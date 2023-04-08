@@ -1,7 +1,7 @@
 import numpy as np
 import time
 
-class BSDEOptionPricingEU:
+class BSDEOptionPricingEuropean:
     def __init__(self, S0, K, T, r, sigma, N, M, opt_type, degree = 3):
         if not isinstance(S0, (int, float)) or S0 <= 0:
             raise ValueError('S0 must be positive.')
@@ -98,7 +98,8 @@ class BSDEOptionPricingEU:
 
 
 
-class ReflectedBSDEOptionPricing(BSDEOptionPricingEU):
+
+class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
     def __init__(self, S0, K, T, r, sigma, N, M, opt_type, lambda_=1.0):
         super().__init__(S0, K, T, r, sigma, N, M, opt_type)
         self.lambda_ = lambda_
@@ -132,7 +133,6 @@ class ReflectedBSDEOptionPricing(BSDEOptionPricingEU):
                     early_exercise_value[exercise_indices], 
                     K[exercise_indices] - 
                     self.lambda_ * K_value[exercise_indices])
-
 
             Z[:, t - 1] = (Y * (S[:, t] - S[:, t - 1])) / (self.sigma * 
                     S[:, t - 1])
