@@ -10,7 +10,7 @@ def main():
     M = 10000
     opt_type = 'call'
     obj1 = BSDEOptionPricingEU(S, K, r, sigma, T, N, M, opt_type)
-    obj2 = ReflectedBSDEOptionPricingAM(S, K, r, sigma, T, N, M, opt_type, 100)
+    obj2 = ReflectedBSDEOptionPricing(S, K, r, sigma, T, N, M, opt_type, 100)
     obj1.run()
     obj2.run()
     
