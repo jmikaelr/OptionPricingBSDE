@@ -14,7 +14,7 @@ This Python script provides a numerical implementation for the pricing of Europe
 There are two main classes in this script:
 
 1. `BSDEOptionPricingEuropean`: This class is responsible for European option pricing using the BSDE method.
-2. `BSDEOptionPricingAmerican`: This class is a subclass of `BSDEOptionPricingEuropean` and is responsible for American option pricing using the BSDE method with a penalty term.
+2. `BSDEOptionPricingAmerican`: This class is a subclass of `BSDEOptionPricingEuropean` and is responsible for American option pricing using the BSDE method with a penalty term (Reflected BSDE).
 
 ## Usage
 
