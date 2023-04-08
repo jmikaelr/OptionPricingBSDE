@@ -1,18 +1,42 @@
-### Backward Stochastic Differential Equations (BSDEs) ###
+DE Option Pricing
 
-Backward Stochastic Differential Equations (BSDEs) are a class of stochastic differential equations that are solved backward in time, starting from a terminal condition at time $T$ and progressing to an initial condition at time $0$. They play an essential role in various fields, particularly in mathematical finance, where they are used to price financial derivatives, such as options.
+This Python script provides a numerical implementation for the pricing of European and American options using the Backward Stochastic Differential Equation (BSDE) method. BSDEs are a type of stochastic differential equation where the terminal condition is specified, and the solution is sought in a backward manner, i.e., from the terminal time to the initial time.
 
-A general BSDE is defined by the following equation:
+## Features
 
-$$ -dY_t = f(t, Y_t, Z_t)dt  - Z_t^*dW_t; \quad Y_T = \xi , $$
+- Pricing of European and American options.
+- Both Call and Put options are supported.
+- Ability to adjust model parameters such as the stock price, strike price, time to maturity, interest rate, volatility, number of time steps, number of sample paths, and option type.
+- Calculation of the hedge ratio (also known as the delta) for the option.
 
-where:
-- $Y_t$ is the process to be solved for, typically representing the value of a financial instrument at time $t$.
-- $Z_t$ is the process representing the optimal hedge or the hedging strategy at time $t$.
-- $f(t, Y_t, Z_t)$ is a known function defining the dynamics of the BSDE.
-- $dW_t$ is the increment of a Brownian motion, which is a stochastic process representing random market movements.
-- $\xi$ is the terminal condition at time $T$, often representing the payoff of a financial instrument.
+## Classes
 
-The solution of a BSDE involves finding the processes $Y_t$ and $Z_t$ such that the equation holds for all $t$ in the interval $[0, T]$. By solving the BSDE, one can obtain the value of a financial instrument and its optimal hedging strategy.
+There are two main classes in this script:
 
-In the context of option pricing, the BSDE can be adjusted to account for the specific characteristics of European or American options. For European options, the payoff is determined at maturity, while for American options, the holder has the right to exercise the option at any time before maturity. By incorporating these features into the BSDE, it is possible to price both types of options accurately.
+1. `BSDEOptionPricingEuropean`: This class is responsible for European option pricing using the BSDE method.
+2. `BSDEOptionPricingAmerican`: This class is a subclass of `BSDEOptionPricingEuropean` and is responsible for American option pricing using the BSDE method with a penalty term.
+
+## Usage
+
+To use the script, create an instance of either `BSDEOptionPricingEuropean` or `BSDEOptionPricingAmerican`, and call the `run()` method. The parameters for the classes are:
+
+- `S0`: Initial stock price (positive float or int)
+- `K`: Strike price (positive float or int)
+- `T`: Time to maturity (positive float or int)
+- `r`: Interest rate (non-negative float or int)
+- `sigma`: Volatility (positive float or int)
+- `N`: Number of time steps (positive int)
+- `M`: Number of sample paths (positive int)
+- `opt_type`: Option type, either 'call' or 'put' (str)
+- `degree`: Degree of the polynomial basis functions for regression (non-negative int, default: 3)
+- `lambda_`: Penalty parameter for American option (positive float, default: 1.0)
+
+Example:
+
+```python
+# Create an instance of the European option pricing class
+european_option = BSDEOptionPricingEuropean(S0=100, K=100, T=1, r=0.05, sigma=0.2, N=100, M=10000, opt_type='call')
+
+# Run the pricing method
+european_option.run()
+
