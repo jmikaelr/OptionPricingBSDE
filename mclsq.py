@@ -134,7 +134,8 @@ class ReflectedBSDEOptionPricing(BSDEOptionPricingEU):
                     self.lambda_ * K_value[exercise_indices])
 
 
-            Z[:, t - 1] = (Y * (S[:, t] - S[:, t - 1])) / (self.sigma * S[:, t - 1])
+            Z[:, t - 1] = (Y * (S[:, t] - S[:, t - 1])) / (self.sigma * 
+                    S[:, t - 1])
 
         Y0 = np.mean(Y * np.exp(-self.r * dt))
 
