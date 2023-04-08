@@ -1,4 +1,4 @@
-DE Option Pricing
+BSDE Option Pricing
 
 This Python script provides a numerical implementation for the pricing of European and American options using the Backward Stochastic Differential Equation (BSDE) method. BSDEs are a type of stochastic differential equation where the terminal condition is specified, and the solution is sought in a backward manner, i.e., from the terminal time to the initial time.
 
