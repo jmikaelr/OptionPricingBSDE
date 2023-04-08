@@ -124,13 +124,16 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
             continuation_value = np.sum(beta_Y * X, axis=1)
             K_value = np.sum(beta_K * X, axis=1)
 
-            early_exercise_value = self._payoff_func(S[:, t])
 
-            exercise_indices = early_exercise_value > continuation_value
-            Y[exercise_indices] = early_exercise_value[exercise_indices]
+            exercise_value = self._payoff_func(S[:, t])
+            exercise_indices = np.logical_and(exercise_value > continuation_value, 
+                    exercise_value > K_value)
+
+
+            Y[exercise_indices] = exercise_value[exercise_indices]
 
             K[exercise_indices] = np.maximum(continuation_value[exercise_indices] - 
-                    early_exercise_value[exercise_indices], 
+                    exercise_value[exercise_indices], 
                     K[exercise_indices] - 
                     self.lambda_ * K_value[exercise_indices])
 
@@ -139,7 +142,7 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
 
         Y0 = np.mean(Y * np.exp(-self.r * dt))
 
-        itm_indices = (self._payoff_func(S[:, 1]) > 0)
+        itm_indices = (self._payoff_func(S[:, 0]) > 0)
         Z0 = np.mean(Z[itm_indices, 1])
 
         return Y0, Z0
