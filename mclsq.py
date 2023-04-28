@@ -1,7 +1,8 @@
 import numpy as np
+import tensorflow as tf
 import time
 
-class BSDEOptionPricingEuropean:
+class BSDEOptionPricingEuropean(object):
     def __init__(self, S0, K, T, r, sigma, N, M, opt_type, degree = 3):
         if not isinstance(S0, (int, float)) or S0 <= 0:
             raise ValueError('S0 must be positive.')
@@ -42,15 +43,14 @@ class BSDEOptionPricingEuropean:
         else:
             raise TypeError('Invalid option type! It should be call or put')
 
-
     def _generate_stock_paths(self):
         dW = np.random.normal(0, np.sqrt(self.dt), (self.M, self.N))
-        S = np.empty((self.M, self.N + 1))
+        S = np.zeros((self.M, self.N + 1))
         S[:, 0] = self.S0
-        for t in range(1, self.N + 1):
-            S[:, t] = S[:, t - 1] * np.exp((self.r - 0.5 * self.sigma ** 2) *
-                    self.dt + self.sigma * dW[:, t - 1])
+        S[:, 1:] = np.exp(np.cumsum((self.r - 0.5 * self.sigma ** 2) * self.dt + self.sigma * dW, axis=1))
+        S *= self.S0
         return S
+
 
     def _payoff_func(self, S_T):
         if self.opt_type == 'call':
@@ -64,10 +64,12 @@ class BSDEOptionPricingEuropean:
             X[:, i] = S_t ** i
         return X
 
+
+
     def _bsde_solver(self):
         S = self._generate_stock_paths()
         Y = self._payoff_func(S[:, -1])
-        Z = np.zeros((self.M, self.N))
+        Z = tf.zeros((self.M, self.N),dtype=tf.float64)
 
         for t in range(self.N - 1, 0, -1):
             dt = self.T / self.N
@@ -76,32 +78,35 @@ class BSDEOptionPricingEuropean:
 
             X = self._generate_regression_basis(S[:, t])
 
-            beta = np.linalg.lstsq(X, Y, rcond=None)[0]
+            beta = tf.linalg.lstsq(X, Y[:, tf.newaxis], fast=True)
+            
+            Y = tf.squeeze(tf.matmul(X, beta))
 
-            Y = np.sum(beta * X, axis=1)
+            diff = (S[:, t] - S[:, t - 1]) / (self.sigma * S[:, t - 1])
+            Z = tf.concat([Z[:, :t-1], Y[:, tf.newaxis] * diff[:, tf.newaxis], Z[:, t:]], axis=1)
 
-            Z[:, t - 1] = (Y * (S[:, t] - S[:, t - 1])) / (self.sigma * 
-                    S[:, t - 1])
-
-        Y0 = np.mean(Y * np.exp(-self.r * dt))
-        Z0 = np.mean(Z[:, 0])
+        with tf.Session() as sess:
+            Y0_np, Z0_np = sess.run([Y, Z[:, 0]])
+            Y0 = np.mean(Y0_np * np.exp(-self.r * dt))
+            Z0 = np.mean(Z0_np)
 
         return Y0, Z0
 
-        
+
+            
     def run(self):
         start_timer = time.time()
         Y0, Z0 = self._bsde_solver()
-        print(f'Runtime: {time.time() - start_timer:.3f}')
-        print(f'Option price: {Y0:.5f}')
-        print(f'Hedge ratio: {Z0:.5f}')
+        print('Runtime: ' + str(time.time() - start_timer))
+        print('Option price: ' + str(Y0))
+        print('Hedge ratio: ' + str(Z0))
 
 
 
 
 class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
     def __init__(self, S0, K, T, r, sigma, N, M, opt_type, lambda_=1.0):
-        super().__init__(S0, K, T, r, sigma, N, M, opt_type)
+        super(BSDEOptionPricingAmerican, self).__init__(S0, K, T, r, sigma, N, M, opt_type)
         self.lambda_ = lambda_
 
     def _bsde_solver(self):
@@ -118,27 +123,37 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
 
             X = self._generate_regression_basis(S[:, t])
 
-            beta_Y = np.linalg.lstsq(X, Y, rcond=None)[0]
-            beta_K = np.linalg.lstsq(X, K, rcond=None)[0]
+            X_tf = tf.constant(X, dtype=tf.float64)
+            Y_tf = tf.constant(Y[:, np.newaxis], dtype=tf.float64)
+            K_tf = tf.constant(K[:, np.newaxis], dtype=tf.float64)
 
-            continuation_value = np.sum(beta_Y * X, axis=1)
-            K_value = np.sum(beta_K * X, axis=1)
+            XtX = tf.matmul(tf.transpose(X_tf), X_tf)
+            L = tf.cholesky(XtX)
 
+            XtY = tf.matmul(tf.transpose(X_tf), Y_tf)
+            XtK = tf.matmul(tf.transpose(X_tf), K_tf)
+
+            beta_Y = tf.cholesky_solve(L, XtY)
+            beta_K = tf.cholesky_solve(L, XtK)
+
+            continuation_value = tf.matmul(X_tf, beta_Y)
+            K_value = tf.matmul(X_tf, beta_K)
+
+            with tf.Session() as sess:
+                continuation_value, K_value = sess.run([tf.squeeze(continuation_value), tf.squeeze(K_value)])
 
             exercise_value = self._payoff_func(S[:, t])
-            exercise_indices = np.logical_and(exercise_value > continuation_value, 
-                    exercise_value > K_value)
-
+            exercise_indices = np.logical_and(exercise_value > continuation_value,
+                                              exercise_value > K_value)
 
             Y[exercise_indices] = exercise_value[exercise_indices]
+            K[exercise_indices] = np.maximum(continuation_value[exercise_indices] -
+                                              exercise_value[exercise_indices],
+                                              K[exercise_indices] -
+                                              self.lambda_ * K_value[exercise_indices])
 
-            K[exercise_indices] = np.maximum(continuation_value[exercise_indices] - 
-                    exercise_value[exercise_indices], 
-                    K[exercise_indices] - 
-                    self.lambda_ * K_value[exercise_indices])
-
-            Z[:, t - 1] = (Y * (S[:, t] - S[:, t - 1])) / (self.sigma * 
-                    S[:, t - 1])
+            Z[:, t - 1] = (Y * (S[:, t] - S[:, t - 1])) / (self.sigma *
+                                                          S[:, t - 1])
 
         Y0 = np.mean(Y * np.exp(-self.r * dt))
 
@@ -146,4 +161,5 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
         Z0 = np.mean(Z[itm_indices, 1])
 
         return Y0, Z0
+
 
