@@ -58,32 +58,40 @@ class BSDEOptionPricingEuropean(object):
         else:
             return np.maximum(self.K - S_T, 0)
 
+    #def _generate_regression_basis(self, S_t):
+    #    X = np.zeros((S_t.shape[0], self.degree + 1))
+    #    for i in range(self.degree + 1):
+    #        X[:, i] = S_t ** i
+    #    return X
+
     def _generate_regression_basis(self, S_t):
-        X = np.zeros((S_t.shape[0], self.degree + 1))
-        for i in range(self.degree + 1):
-            X[:, i] = S_t ** i
-        return X
+        return tf.stack([tf.ones_like(S_t, dtype=tf.float64), S_t, S_t**2, S_t**3], axis=1)
 
 
-
+   
     def _bsde_solver(self):
         S = self._generate_stock_paths()
-        Y = self._payoff_func(S[:, -1])
-        Z = tf.zeros((self.M, self.N),dtype=tf.float64)
+        Y = tf.constant(self._payoff_func(S[:, -1]), dtype=tf.float64)
+        Z = tf.zeros((self.M, self.N), dtype=tf.float64)
 
         for t in range(self.N - 1, 0, -1):
             dt = self.T / self.N
-            discount_factor = np.exp(-self.r * dt)
+            discount_factor = tf.exp(tf.cast(-self.r * dt, dtype=tf.float64))
             Y = Y * discount_factor
 
             X = self._generate_regression_basis(S[:, t])
 
-            beta = tf.linalg.lstsq(X, Y[:, tf.newaxis], fast=True)
-            
-            Y = tf.squeeze(tf.matmul(X, beta))
+            XtX = tf.matmul(tf.transpose(X), X)
+            L = tf.cholesky(XtX)
 
-            diff = (S[:, t] - S[:, t - 1]) / (self.sigma * S[:, t - 1])
-            Z = tf.concat([Z[:, :t-1], Y[:, tf.newaxis] * diff[:, tf.newaxis], Z[:, t:]], axis=1)
+            XtY = tf.matmul(tf.transpose(X), Y[:, tf.newaxis])
+            beta_Y = tf.cholesky_solve(L, XtY)
+            Y = tf.squeeze(tf.matmul(X, beta_Y))
+
+            diff = (S[:, t] - S[:, t - 1]) / (S[:, t - 1] * self.sigma * np.sqrt(dt))
+            XtZ = tf.matmul(tf.transpose(X), diff[:, tf.newaxis])
+            beta_Z = tf.cholesky_solve(L, XtZ)
+            Z = tf.concat([Z[:, :t - 1], tf.matmul(X, beta_Z), Z[:, t:]], axis=1)
 
         with tf.Session() as sess:
             Y0_np, Z0_np = sess.run([Y, Z[:, 0]])
@@ -91,6 +99,7 @@ class BSDEOptionPricingEuropean(object):
             Z0 = np.mean(Z0_np)
 
         return Y0, Z0
+
 
 
             
@@ -109,57 +118,56 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
         super(BSDEOptionPricingAmerican, self).__init__(S0, K, T, r, sigma, N, M, opt_type)
         self.lambda_ = lambda_
 
+
+
     def _bsde_solver(self):
         S = self._generate_stock_paths()
-        Y = self._payoff_func(S[:, -1])
-        Z = np.zeros((self.M, self.N))
-        K = np.zeros_like(Y)
+        Y = tf.constant(self._payoff_func(S[:, -1]), dtype=tf.float64)
+        Z = tf.zeros((self.M, self.N), dtype=tf.float64)
+        K = tf.zeros_like(Y)
 
         for t in range(self.N - 1, 0, -1):
             dt = self.T / self.N
-            discount_factor = np.exp(-self.r * dt)
+            discount_factor = tf.exp(tf.cast(-self.r * dt, dtype=tf.float64))
             Y = Y * discount_factor
             K = K * discount_factor
 
             X = self._generate_regression_basis(S[:, t])
 
-            X_tf = tf.constant(X, dtype=tf.float64)
-            Y_tf = tf.constant(Y[:, np.newaxis], dtype=tf.float64)
-            K_tf = tf.constant(K[:, np.newaxis], dtype=tf.float64)
+            #Y_tf = Y[:, tf.newaxis]
+            #K_tf = K[:, tf.newaxis]
 
-            XtX = tf.matmul(tf.transpose(X_tf), X_tf)
+            XtX = tf.matmul(tf.transpose(X), X)
             L = tf.cholesky(XtX)
 
-            XtY = tf.matmul(tf.transpose(X_tf), Y_tf)
-            XtK = tf.matmul(tf.transpose(X_tf), K_tf)
+            XtY = tf.matmul(tf.transpose(X), Y_tf)
+            XtK = tf.matmul(tf.transpose(X), K_tf)
 
             beta_Y = tf.cholesky_solve(L, XtY)
             beta_K = tf.cholesky_solve(L, XtK)
 
-            continuation_value = tf.matmul(X_tf, beta_Y)
-            K_value = tf.matmul(X_tf, beta_K)
+            continuation_value = tf.matmul(X, beta_Y)
+            K_value = tf.matmul(X, beta_K)
 
-            with tf.Session() as sess:
-                continuation_value, K_value = sess.run([tf.squeeze(continuation_value), tf.squeeze(K_value)])
+            exercise_value = tf.constant(self._payoff_func(S[:, t]), dtype=tf.float64)
 
-            exercise_value = self._payoff_func(S[:, t])
-            exercise_indices = np.logical_and(exercise_value > continuation_value,
-                                              exercise_value > K_value)
+            exercise_indices = tf.logical_and(exercise_value > tf.squeeze(continuation_value),
+                                                   exercise_value > tf.squeeze(K_value))
 
-            Y[exercise_indices] = exercise_value[exercise_indices]
-            K[exercise_indices] = np.maximum(continuation_value[exercise_indices] -
-                                              exercise_value[exercise_indices],
-                                              K[exercise_indices] -
-                                              self.lambda_ * K_value[exercise_indices])
+            Y = tf.where(exercise_indices, exercise_value, Y)
+            K = tf.where(exercise_indices,
+                         tf.maximum(tf.squeeze(continuation_value) - exercise_value,
+                                    K - self.lambda_ * tf.squeeze(K_value)),
+                         K)
 
-            Z[:, t - 1] = (Y * (S[:, t] - S[:, t - 1])) / (self.sigma *
-                                                          S[:, t - 1])
+            diff = (S[:, t] - S[:, t - 1]) / (S[:, t - 1] * self.sigma * np.sqrt(dt))
+            Z_tf = tf.where(exercise_indices, diff, tf.zeros_like(diff, dtype=tf.float64))
+            Z = tf.concat([Z[:, :t - 1], Z_tf[:, tf.newaxis], Z[:, t:]], axis=1)
 
-        Y0 = np.mean(Y * np.exp(-self.r * dt))
-
-        itm_indices = (self._payoff_func(S[:, 0]) > 0)
-        Z0 = np.mean(Z[itm_indices, 1])
+        with tf.Session() as sess:
+            Y0_np, Z0_np = sess.run([Y, Z[:, 0]])
+            Y0 = np.mean(Y0_np * np.exp(-self.r * dt))
+            Z0 = np.mean(Z0_np)
 
         return Y0, Z0
-
 
