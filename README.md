@@ -23,7 +23,7 @@ This repository contains the implementation of the Monte Carlo Least Squares Met
 
 ```bash
 bash install_and_run.sh
-
+```
 ## Usage
 
 In the `main.py` file, you can adjust the option parameters to match your desired setup. The following parameters can be changed:
