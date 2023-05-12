@@ -9,7 +9,7 @@ def main():
     sigma = 0.2
     T = 1.0
     N = 252
-    M = 100000
+    M = 1000
     opt_type = 'call'
     euro_opt = BSDEOptionPricingEuropean(S, K, r, sigma, T, N, M, opt_type)
     #american_opt = BSDEOptionPricingAmerican(S, K, r, sigma, T, N, M, opt_type)
