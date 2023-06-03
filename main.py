@@ -11,11 +11,11 @@ def main():
     N = 252
     M = 1000
     opt_type = 'call'
-    euro_opt = BSDEOptionPricingEuropean(S, K, r, sigma, T, N, M, opt_type)
-    #american_opt = BSDEOptionPricingAmerican(S, K, r, sigma, T, N, M, opt_type)
-    euro_opt.run()
-    print('European Option (Black Scholes): ' + str(BS_CALL(S,K,T,r,sigma)))
-    #american_opt.run()
+    #euro_opt = BSDEOptionPricingEuropean(S, K, r, sigma, T, N, M, opt_type)
+    american_opt = BSDEOptionPricingAmerican(S, K, r, sigma, T, N, M, opt_type)
+    #euro_opt.run()
+    #print('European Option (Black Scholes): ' + str(BS_CALL(S,K,T,r,sigma)))
+    american_opt.run()
     
 
 

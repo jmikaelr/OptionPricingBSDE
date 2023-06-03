@@ -33,6 +33,8 @@ class BSDEOptionPricingEuropean(object):
         self.degree = degree
         self.dt = T / N
 
+        self.type = 'European'
+
     def _get_opt_type(self, opt_type):
         if not isinstance(opt_type, str):
             raise TypeError('Option type should be a string!')
@@ -110,17 +112,18 @@ class BSDEOptionPricingEuropean(object):
         Y0, Z0, opt_prices, hedge_ratios = self._bsde_solver()
         lower_bound_opt, upper_bound_opt = self._confidence_interval(opt_prices)
         lower_bound_hedge, upper_bound_hedge = self._confidence_interval(hedge_ratios)
-        print('Runtime: ' + str(time.time() - start_timer))
-        print('Option Price: ' + str(Y0) + ', [' + str(lower_bound_opt) + ', ' + 
-                str(upper_bound_opt) + ']')
-        print('Hedge Ratio: ' + str(Z0) + ', [' + str(lower_bound_hedge) + ', ' + 
-                str(upper_bound_hedge) + ']')
+        runtime = time.time() - start_timer
+        print(str(runtime) + ',' + str(Y0) + ',' + 
+                str(lower_bound_opt) + ',' + str(upper_bound_opt) + ',' + 
+                str(Z0) + ',' + str(lower_bound_hedge) + ',' + 
+                str(upper_bound_hedge))
 
 class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
     def __init__(self, S0, K, T, r, sigma, N, M, opt_type, lambda_=1.0):
         super(BSDEOptionPricingAmerican, self).__init__(S0, K, T, r, sigma, 
                 N, M, opt_type)
         self.lambda_ = lambda_
+        self.type = 'American'
 
     def _bsde_solver(self):
         S = self._generate_stock_paths()

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "Installing requirements..."
-python install_requirements.py
+python2 install_requirements.py
 
 echo "Running main.py..."
-python main.py
+python2 main.py
