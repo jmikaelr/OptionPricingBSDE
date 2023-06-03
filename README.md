@@ -7,12 +7,14 @@ This repository contains the implementation of the Monte Carlo Least Squares Met
 - `mclsq.py`: The custom module containing the main classes for option pricing.
 - `main.py`: The main script that uses the classes in `mclsq.py` to run the option pricing simulations.
 - `install_and_run.sh`: A bash script for creating a virtual environment, installing the required packages, and running the main script.
+- `run_script_1000.sh`: A bash script for running main.py file 1000 times.
+
 
 ## Requirements
 
-- Python 3.6 or higher
+- Python 2.7.18
 - NumPy
-- TensorFlow 1.15.0
+- TensorFlow 1.5
 - SciPy
 
 ## Getting Started
