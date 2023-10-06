@@ -12,13 +12,13 @@ def main():
     N = 25
     M = 8920
     opt_type = 'call'
-    euro_opt = BSDEOptionPricingEuropean(S, K, r, sigma, T, N, M, 100, opt_type)
-    #american_opt = BSDEOptionPricingAmerican(S, K, r, sigma, T, N, M, opt_type)
-    euro_opt.run()
-    print('European Option (Black Scholes): ' + str(BS_CALL(S,K,T,r,sigma)))
-    #american_opt.run()
-    #price = longstaff_schwartz(S, K, r, sigma, T, N, M, opt_type)
-    #print(f"American {opt_type} option price: {price:.2f}")
+    #euro_opt = BSDEOptionPricingEuropean(S, K, r, sigma, T, N, M, 100, opt_type)
+    american_opt = BSDEOptionPricingAmerican(S, K, r, sigma, T, N, M, 100, opt_type)
+    #euro_opt.run()
+    #print('European Option (Black Scholes): ' + str(BS_CALL(S,K,T,r,sigma)))
+    american_opt.run()
+    price = longstaff_schwartz(S, K, r, sigma, T, N, M, opt_type)
+    print(f"American {opt_type} option price: {price:.2f}")
     
 
 

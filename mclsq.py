@@ -121,4 +121,38 @@ class BSDEOptionPricingEuropean:
         est_Y0, std_Y0, CI = self._confidence_interval(Y0_array)
         print(f"\nBSDE solved in: {finished_time:.2f} seconds\nEstimated option price: {est_Y0:.4f}\nWith standard deviation: {std_Y0:.4f}\nConfidence interval: {CI}")
 
+class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
+
+    def _bsde_solver(self):
+        Y0 = np.zeros(self.samples)
+        Z_mean = np.zeros(self.N)
+
+        for k in range(self.samples):
+            S = self._generate_stock_paths()
+            Y = np.zeros((self.M, self.N + 1))
+            Z = np.zeros((self.M, self.N))  # Hedging ratios
+
+            Y[:, self.N] = self._payoff_func(S[:, self.N])
+
+            for i in range(self.N, 0, -1):
+                X = self._generate_regression(S[:, i])
+                XtX = cholesky(X.T @ X).T
+                beta = np.linalg.solve(XtX, X.T @ Y[:, i])
+                alpha = np.linalg.solve(XtX.T, beta)
+
+                Z[:, i - 1] = alpha[1] 
+
+                E = X @ alpha
+                for _ in range(3):
+                    continuation_value = E + (-self.r * Y[:, i-1]) * (self.T / self.N)
+                    exercise_value = self._payoff_func(S[:, i-1])
+
+                    Y[:, i-1] = np.maximum(continuation_value, exercise_value)
+
+            Y_est = np.sum(Y[:, 1]) / self.M + (-self.r * np.mean(Y[:, 1])) * (self.T / self.N)
+            Y0[k] = Y_est
+            Z_mean += np.mean(Z, axis=0)
+        Z_mean /= self.samples
+
+        return Y0, Z_mean
 
