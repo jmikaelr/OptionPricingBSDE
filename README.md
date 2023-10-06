@@ -18,8 +18,6 @@ This module provides implementations for option pricing based on the backward st
 
 1. **BSDEOptionPricingEuropean**: Class to compute European option price using BSDE.
 2. **BSDEOptionPricingAmerican**: Class to compute American option price using BSDE.
-3. **BS_CALL**: Function to compute European option price using Black-Scholes formula.
-4. **longstaff_schwartz**: Function to compute American option price using the Longstaff-Schwartz method.
 
 ## Usage:
 
@@ -27,7 +25,7 @@ Simply instantiate the appropriate class (`BSDEOptionPricingEuropean` or `BSDEOp
 
 Example:
 ```python
-S, K, r, sigma, T, N, M, opt_type = 100.0, 95.0, 0.01, 0.2, 0.25, 25, 8920, 'call'
+S, K, r, sigma, T, N, M, samples, opt_type = 100.0, 95.0, 0.01, 0.2, 0.25, 25, 8920, 100, 'call'
 american_opt = BSDEOptionPricingAmerican(S, K, r, sigma, T, N, M, 100, opt_type)
 american_opt.run()
 
