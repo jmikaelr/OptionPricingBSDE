@@ -1,10 +1,10 @@
-import numpy as np
-import tensorflow as tf
 import time
-import scipy.stats as stats
+import numpy as np
+from scipy.linalg import cholesky
+from scipy.stats import norm
 
-class BSDEOptionPricingEuropean(object):
-    def __init__(self, S0, K, T, r, sigma, N, M, opt_type, degree = 3):
+class BSDEOptionPricingEuropean:
+    def __init__(self, S0, K, r, sigma, T, N, M, samples = 100, option_type="call", degree = 3):
         if not isinstance(S0, (int, float)) or S0 <= 0:
             raise ValueError('S0 must be positive.')
         if not isinstance(K, (int, float)) or K <= 0:
@@ -29,11 +29,10 @@ class BSDEOptionPricingEuropean(object):
         self.sigma = sigma
         self.N = N
         self.M = M
-        self.opt_type = self._get_opt_type(opt_type)
+        self.option_type = self._get_opt_type(option_type)
         self.degree = degree
         self.dt = T / N
-
-        self.type = 'European'
+        self.samples = samples
 
     def _get_opt_type(self, opt_type):
         if not isinstance(opt_type, str):
@@ -45,136 +44,81 @@ class BSDEOptionPricingEuropean(object):
         else:
             raise TypeError('Invalid option type! It should be call or put')
 
+    def _payoff_func(self, S):
+        if self.option_type == "call":
+            return np.maximum(S - self.K, 0)
+        elif self.option_type == "put":
+            return np.maximum(self.K - S, 0)
+        else:
+            raise ValueError(f"Invalid option type: {self.option_type}. Supported types are 'call' and 'put'.")
+
     def _generate_stock_paths(self):
         dW = np.random.normal(0, np.sqrt(self.dt), (self.M, self.N))
         S = np.zeros((self.M, self.N + 1))
         S[:, 0] = self.S0
-        S[:, 1:] = np.exp(np.cumsum((self.r - 0.5 * self.sigma ** 2) * 
-            self.dt + self.sigma * dW, axis=1))
+        S[:, 1:] = np.exp(np.cumsum((self.r - 0.5 * self.sigma ** 2) * self.dt + self.sigma * dW, axis=1))
         S *= self.S0
         return S
 
-    def _payoff_func(self, S_T):
-        if self.opt_type == 'call':
-            return np.maximum(S_T - self.K, 0)
+    def _generate_regression(self, S):
+        if self.degree == 3:
+            pol = lambda x: [1, 1-x, (x**2 - 4*x + 2)/2, (-x**3 + 9*x**2 - 18*x + 6)/6]
+        elif self.degree == 2:
+            pol = lambda x: [1, 1-x, (x**2 - 4*x + 2)/2]
+        elif self.degree == 1:
+            pol = lambda x: [1, 1-x]
         else:
-            return np.maximum(self.K - S_T, 0)
-
-    def _generate_regression_basis(self, S_t):
-        return tf.stack([tf.ones_like(S_t, dtype=tf.float64), S_t, S_t**2],
-                axis=1)
+            raise ValueError(f"Invalid degree on Polynomial basis, you choosed: {self.degree}, choose between 1,2 or 3")
+        Mk = np.zeros((S.shape[0], self.degree+1))
+        for m in range(S.shape[0]):
+            Mk[m, :] = pol(S[m])
+        return Mk
 
     def _bsde_solver(self):
-        S = self._generate_stock_paths()
-        Y = tf.constant(self._payoff_func(S[:, -1]), dtype=tf.float64)
-        Z = tf.zeros((self.M, self.N), dtype=tf.float64)
+        Y0 = np.zeros(self.samples)
+        Z_mean = np.zeros(self.N)
 
-        for t in range(self.N - 1, 0, -1):
-            dt = self.T / self.N
-            discount_factor = tf.exp(tf.cast(-self.r * dt, dtype=tf.float64))
-            Y = Y * discount_factor
+        for k in range(self.samples):
+            S = self._generate_stock_paths()
+            Y = np.zeros((self.M, self.N + 1))
+            Z = np.zeros((self.M, self.N))  # Hedging ratios
 
-            X = self._generate_regression_basis(S[:, t])
+            Y[:, self.N] = self._payoff_func(S[:, self.N])
 
-            XtX = tf.matmul(tf.transpose(X), X)
-            L = tf.cholesky(XtX)
+            for i in range(self.N, 0, -1):
+                X = self._generate_regression(S[:, i])
+                XtX = cholesky(X.T @ X).T
+                beta = np.linalg.solve(XtX, X.T @ Y[:, i])
+                alpha = np.linalg.solve(XtX.T, beta)
 
-            XtY = tf.matmul(tf.transpose(X), Y[:, tf.newaxis])
-            beta_Y = tf.cholesky_solve(L, XtY)
-            Y = tf.squeeze(tf.matmul(X, beta_Y))
+                Z[:, i - 1] = alpha[1] 
 
-            diff = (S[:, t] - S[:, t - 1]) / (S[:, t - 1] * self.sigma * 
-                    np.sqrt(dt))
-            XtZ = tf.matmul(tf.transpose(X), diff[:, tf.newaxis])
-            beta_Z = tf.cholesky_solve(L, XtZ)
-            Z = tf.concat([Z[:, :t - 1], tf.matmul(X, beta_Z), Z[:, t:]],
-                    axis=1)
+                E = X @ alpha
+                for _ in range(3):
+                    Y[:, i-1] = E + (-self.r * Y[:, i-1]) * (self.T / self.N)
 
-        with tf.Session() as sess:
-            Y0_np, Z_np = sess.run([Y, Z])
-            Y0 = np.mean(Y0_np * np.exp(-self.r * dt))
+            Y_est = np.sum(Y[:, 1]) / self.M + (-self.r * np.mean(Y[:, 1])) * (self.T / self.N)
+            Y0[k] = Y_est
+            Z_mean += np.mean(Z, axis=0)
+        Z_mean /= self.samples
 
-            avg_hedge_ratios = np.mean(Z_np, axis = 1)
-            Z0 = np.mean(avg_hedge_ratios)
-        return Y0, Z0, (Y0_np * np.exp(-self.r * dt)), avg_hedge_ratios
+        return Y0, Z_mean
+
+
 
     def _confidence_interval(self, sample):
-        std_dev = np.std(sample)
-        sem = std_dev / np.sqrt(self.M)
-        t_critical = stats.t.ppf(0.975, df=self.M - 1)
-        margin_of_error = t_critical * sem
-        lower_bound = np.mean(sample) - margin_of_error
-        upper_bound = np.mean(sample) + margin_of_error
-        return lower_bound, upper_bound
+        mean_sample = np.mean(sample)
+        std_sample = np.std(sample)
+        upper = mean_sample + norm.ppf(0.975) * std_sample/np.sqrt(self.M)
+        lower = mean_sample + norm.ppf(0.025) * std_sample/np.sqrt(self.M)
+        CI = [lower, upper]
+        return mean_sample, std_sample, CI
 
     def run(self):
         start_timer = time.time()
-        Y0, Z0, opt_prices, hedge_ratios = self._bsde_solver()
-        lower_bound_opt, upper_bound_opt = self._confidence_interval(opt_prices)
-        lower_bound_hedge, upper_bound_hedge = self._confidence_interval(hedge_ratios)
-        runtime = time.time() - start_timer
-        print(str(runtime) + ',' + str(Y0) + ',' + 
-                str(lower_bound_opt) + ',' + str(upper_bound_opt) + ',' + 
-                str(Z0) + ',' + str(lower_bound_hedge) + ',' + 
-                str(upper_bound_hedge))
+        Y0_array, Z_array = self._bsde_solver()
+        finished_time = time.time() - start_timer
+        est_Y0, std_Y0, CI = self._confidence_interval(Y0_array)
+        print(f"\nBSDE solved in: {finished_time:.2f} seconds\nEstimated option price: {est_Y0:.4f}\nWith standard deviation: {std_Y0:.4f}\nConfidence interval: {CI}")
 
-class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
-    def __init__(self, S0, K, T, r, sigma, N, M, opt_type, lambda_=1.0):
-        super(BSDEOptionPricingAmerican, self).__init__(S0, K, T, r, sigma, 
-                N, M, opt_type)
-        self.lambda_ = lambda_
-        self.type = 'American'
-
-    def _bsde_solver(self):
-        S = self._generate_stock_paths()
-        Y = tf.constant(self._payoff_func(S[:, -1]), dtype=tf.float64)
-        Z = tf.zeros((self.M, self.N), dtype=tf.float64)
-        K = tf.zeros_like(Y)
-
-        for t in range(self.N - 1, 0, -1):
-            dt = self.T / self.N
-            discount_factor = tf.exp(tf.cast(-self.r * dt, dtype=tf.float64))
-            Y = Y * discount_factor
-            K = K * discount_factor
-
-            X = self._generate_regression_basis(S[:, t])
-
-            XtX = tf.matmul(tf.transpose(X), X)
-            L = tf.cholesky(XtX)
-
-            XtY = tf.matmul(tf.transpose(X), Y[:, tf.newaxis])
-            XtK = tf.matmul(tf.transpose(X), K[:, tf.newaxis])
-
-            beta_Y = tf.cholesky_solve(L, XtY)
-            beta_K = tf.cholesky_solve(L, XtK)
-
-            continuation_value = tf.matmul(X, beta_Y)
-            K_value = tf.matmul(X, beta_K)
-
-            exercise_value = tf.constant(self._payoff_func(S[:, t]), 
-                    dtype=tf.float64)
-
-            exercise_indices = tf.logical_and(exercise_value > 
-                    tf.squeeze(continuation_value), exercise_value > 
-                    tf.squeeze(K_value))
-
-            Y = tf.where(exercise_indices, exercise_value, Y)
-            K = tf.where(exercise_indices,
-                         tf.maximum(tf.squeeze(continuation_value) - 
-                             exercise_value, K - self.lambda_ * 
-                             tf.squeeze(K_value)), K)
-
-            diff = (S[:, t] - S[:, t - 1]) / (S[:, t - 1] * self.sigma *
-                    np.sqrt(dt))
-            Z_tf = tf.where(exercise_indices, diff, tf.zeros_like(diff,
-                dtype=tf.float64))
-            Z = tf.concat([Z[:, :t - 1], Z_tf[:, tf.newaxis], Z[:, t:]], axis=1)
-
-        with tf.Session() as sess:
-            Y0_np, Z_np = sess.run([Y, Z])
-            Y0 = np.mean(Y0_np * np.exp(-self.r * dt))
-
-            avg_hedge_ratios = np.mean(Z_np, axis = 1)
-            Z0 = np.mean(avg_hedge_ratios)
-        return Y0, Z0, (Y0_np * np.exp(-self.r * dt)), avg_hedge_ratios
 
