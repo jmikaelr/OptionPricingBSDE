@@ -1,53 +1,33 @@
-# Option Pricing with BSDE
+# BSDE Option Pricing
 
-This repository contains the implementation of the Monte Carlo Least Squares Method for pricing European and American options using Backward Stochastic Differential Equations (BSDE). The implementation is done using Python, NumPy, and TensorFlow 1.15.0.
+This module provides implementations for option pricing based on the backward stochastic differential equation (BSDE) method for both European and American options. Additionally, it includes the traditional Black-Scholes formula for European options and the Longstaff-Schwartz method for pricing American options.
 
-## Files
+## Features:
 
-- `mclsq.py`: The custom module containing the main classes for option pricing.
-- `main.py`: The main script that uses the classes in `mclsq.py` to run the option pricing simulations.
-- `install_and_run.sh`: A bash script for creating a virtual environment, installing the required packages, and running the main script.
-- `run_script.sh`: A bash script for running main.py file and writing to output.csv. Takes one arguments, representing how many times the script should be executed.
+1. **BSDE Method**: Uses BSDE for European and American option pricing.
+2. **Black-Scholes**: Provides the classic Black-Scholes formula for European option pricing.
+3. **Longstaff-Schwartz**: Uses the least squares Monte Carlo method by Longstaff and Schwartz for American option pricing.
 
+## Requirements:
 
-## Requirements
+- Python (3.6 or later)
+- `numpy`
+- `scipy`
 
-- Python 2.7.18
-- NumPy
-- TensorFlow 1.5
-- SciPy
+## Classes:
 
-## Getting Started
+1. **BSDEOptionPricingEuropean**: Class to compute European option price using BSDE.
+2. **BSDEOptionPricingAmerican**: Class to compute American option price using BSDE.
+3. **BS_CALL**: Function to compute European option price using Black-Scholes formula.
+4. **longstaff_schwartz**: Function to compute American option price using the Longstaff-Schwartz method.
 
-1. Clone this repository to your local machine.
-2. Open a terminal and navigate to the repository's root directory.
-3. Run the `install_and_run.sh` script by executing the following command:
+## Usage:
 
-```bash
-bash install_and_run.sh
-```
-## Usage
+Simply instantiate the appropriate class (`BSDEOptionPricingEuropean` or `BSDEOptionPricingAmerican`) with the required parameters, then run the `run()` method.
 
-In the `main.py` file, you can adjust the option parameters to match your desired setup. The following parameters can be changed:
-
-- `S`: Initial stock price
-- `K`: Strike price
-- `r`: Risk-free interest rate
-- `sigma`: Volatility
-- `T`: Time to maturity
-- `N`: Number of time steps
-- `M`: Number of simulated paths
-- `opt_type`: Option type (either 'call' or 'put')
-
-After adjusting the parameters, run the `main.py` script to see the option price and hedge ratio for both European and American options.
-
-## Example
-
+Example:
 ```python
-# Create an instance of the European option pricing class
-european_option = BSDEOptionPricingEuropean(S0=100, K=100, T=1, r=0.05, sigma=0.2, N=100, M=10000, opt_type='call')
-
-# Run the pricing method
-european_option.run()
-
+S, K, r, sigma, T, N, M, opt_type = 100.0, 95.0, 0.01, 0.2, 0.25, 25, 8920, 'call'
+american_opt = BSDEOptionPricingAmerican(S, K, r, sigma, T, N, M, 100, opt_type)
+american_opt.run()
 
