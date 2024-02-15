@@ -1,16 +1,15 @@
 import time
+import scipy
+import os
+from datetime import datetime
+import csv
 import numpy as np
 from scipy.linalg import cholesky
 from scipy.stats import norm
 from scipy.special import laguerre
 
-LAGUERRE_BASIS = {
-    n: [laguerre(i) for i in range(n+1)]
-    for n in range(1, 11)
-}
-
 class BSDEOptionPricingEuropean:
-    def __init__(self, S0, K, r, mu, sigma, T, N, M, lower = 0.025, samples = 100,
+    def __init__(self, S0, K, r, sigma, T, N, M, lower = 0.025, samples = 100,
                  option_payoff="call", degree = 3):
         if not isinstance(S0, (int, float)) or S0 <= 0:
             raise ValueError('S0 must be positive.')
@@ -20,8 +19,6 @@ class BSDEOptionPricingEuropean:
             raise ValueError('T must be positive.')
         if not isinstance(r, (int, float)):
             raise ValueError('r must be integer or float.')
-        if not isinstance(mu, (int, float)):
-            raise ValueError('mu must be integer or float.')
         if not isinstance(sigma, (int, float)) or sigma <= 0:
             raise ValueError('sigma must be positive.')
         if not isinstance(N, int) or N <= 0:
@@ -37,9 +34,7 @@ class BSDEOptionPricingEuropean:
         self.K = K
         self.T = T
         self.r = r
-        self.mu = mu
         self.sigma = sigma
-        self.lamb = (self.mu - self.r)/(self.sigma)
         self.N = N
         self.M = M
         self.option_payoff = self._get_opt_payoff(option_payoff)
@@ -73,74 +68,111 @@ class BSDEOptionPricingEuropean:
         if self.degree > 10 or self.degree < 1:
             raise ValueError(f"Invalid degree on Polynomial basis, you chose: {self.degree}, choose between 1 and 10")
         
-        basis_polynomials = LAGUERRE_BASIS[self.degree]
-        Mk = np.array([pol(s) for s in S for pol in basis_polynomials]).reshape(S.shape[0], len(basis_polynomials))
+        S_expanded = np.expand_dims(S, axis=-1)   
+        basis_polynomials = np.array([np.polynomial.laguerre.Laguerre.basis(deg)(S_expanded) for deg in range(self.degree + 1)])
+        Mk = np.transpose(basis_polynomials, (1, 2, 0)).reshape(S.shape[0], self.degree + 1)
         return Mk
 
     def _generate_stock_paths(self):
-        """ Simulate Geometric Brownian Motion with a standard normal Brownian
-        process """
-        dW = np.random.normal(0, 1, (self.M, self.N+1))
-        S = np.zeros((self.M, self.N+1))
-        S[:,0] = self.S0
-        for t in range(1, self.N+1):
-            S[:, t] = S[:, t-1] * np.exp((self.r - 0.5 * self.sigma**2) * self.dt + 
-                                         self.sigma * np.sqrt(self.dt) * dW[:, t])
+        """Simulate Geometric Brownian Motion paths in a fully vectorized manner."""
+        dt = self.T / self.N
+        dW = np.random.normal(0, np.sqrt(dt), (self.M, self.N))
+        log_S = np.cumsum((self.r - 0.5 * self.sigma**2) * dt + self.sigma * dW, axis=1)
+        S = self.S0 * np.exp(np.hstack([np.zeros((self.M, 1)), log_S]))
         return S, dW
 
     def _bsde_solver(self):
-        """ Solves the BSDE equation """
-        Y0 = np.zeros(self.samples)
+        """ Solves the BSDE equation for an european option using Cholesky Decomposition"""
+        Y0_samples = np.zeros(self.samples)
+        Z0_samples = np.zeros(self.samples)
 
         for k in range(self.samples):
             S, dW = self._generate_stock_paths()
             Y = np.zeros((self.M, self.N + 1))
+            Z = np.zeros((self.M, self.N))
 
             Y[:, self.N] = self._payoff_func(S[:, self.N])
 
             for i in range(self.N, 0, -1):
                 X = self._generate_regression(S[:, i])
+                A = X.T @ X
+
                 try:
-                    beta = np.linalg.solve(X.T @ X, X.T @ Y[:, i])
-                except np.linalg.LinAlgError as e:
-                    print(f'Linear algebra error at time step {i}: {e}')
-                    continue
+                    L = scipy.linalg.cholesky(A, lower=True)
+                    y = scipy.linalg.solve_triangular(L, X.T @ Y[:, i], lower=True)
+                    alpha = scipy.linalg.solve_triangular(L.T, y, lower=False)
+                except scipy.linalg.LinAlgError as e:
+                    alpha = np.linalg.lstsq(A, X.T @ Y[:, i], rcond=None)[0]
 
-                E = X @ beta
-                discount_factor = np.exp(-self.r * self.dt)
-                Y[:, i-1] = discount_factor * E 
+                continuation_value = X @ alpha
+                Y[:, i-1] = continuation_value * np.exp(-self.r * self.dt)
 
-            Y_est = np.mean(Y[:, 1])
-            Y0[k] = Y_est
+                #Z[:, i-1] = np.sum((dW[:, i] / (self.sigma * np.sqrt(self.dt))) * (Y[:, i] - Y[:, i-1]), axis=0) / self.M
+                #Z[:, i-1] = (Y[:, i] - Y[:, i-1])/(S[:, i]- S[:, i-1])
 
-        return Y0
+            Y0_samples[k] = np.mean(Y[:, 0])
+            #Z0_samples[k] = np.mean(Z[:, 0])
 
+        return Y0_samples, 0
 
     def _confidence_interval(self, sample):
+        """ Calculates the confidence interval with lower limit self.lower """
         mean_sample = np.mean(sample)
         std_sample = np.std(sample)
         upper = mean_sample + norm.ppf(1-self.lower/2) * std_sample/np.sqrt(self.M)
         lower = mean_sample - norm.ppf(1-self.lower/2) * std_sample/np.sqrt(self.M)
-        CI = [lower, upper]
+        CI = [round(lower,4), round(upper,4)]
         return mean_sample, std_sample, CI
 
     def run(self):
+        """ Method called to run the program and solve the BSDE """
         start_timer = time.time()
-        Y0_array = self._bsde_solver()
+        Y0_array, Z0_array = self._bsde_solver()
         finished_time = time.time() - start_timer
         est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
+        est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
         print(f"\nBSDE solved in: {finished_time:.2f} seconds"
                 f"\nEstimated option price: {est_Y0:.4f}"
                 f"\nWith standard deviation: {std_Y0:.4f}"
-                f"\nConfidence interval: {CI_Y}")
+                f"\nConfidence interval: {CI_Y}"
+                f"\nEstimated hedge strategy: {est_Z0:.4f}"
+                f"\nWith standard deviation: {std_Z0:.4f}"
+                f"\nConfidence interval: {CI_Z}")
 
 class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
 
     def _bsde_solver(self):
-        Y0 = np.zeros(self.samples)  # Will store the estimated option value at t=0 for each sample
-        Z0 = np.zeros((self.samples, self.N))  # Will store the hedging strategy for each sample
-        
-        return Y0, Z0
+        """ Solves the RBSDE for an American option pricing problem using Cholesky Decomposition """
+        Y0_samples = np.zeros(self.samples)
+        Z0_samples = np.zeros(self.samples)
 
-        return Y0
+        for k in range(self.samples):
+            S, dW = self._generate_stock_paths()
+            Y = np.zeros((self.M, self.N + 1))
+            Z = np.zeros((self.M, self.N))
 
+            Y[:, self.N] = self._payoff_func(S[:, self.N])
+
+            for i in range(self.N, 0, -1):
+                X = self._generate_regression(S[:, i])
+                A = X.T @ X
+
+                try:
+                    L = scipy.linalg.cholesky(A, lower=True)
+                    y = scipy.linalg.solve_triangular(L, X.T @ Y[:, i], lower=True)
+                    alpha = scipy.linalg.solve_triangular(L.T, y, lower=False)
+                except scipy.linalg.LinAlgError as e:
+                    alpha = np.linalg.lstsq(A, X.T @ Y[:, i], rcond=None)[0]
+
+                continuation_value = X @ alpha
+                discount_factor = np.exp(-self.dt * self.r)
+                exercise_value = self._payoff_func(S[:, i-1])
+
+                Y[:, i-1] = np.maximum(continuation_value * discount_factor, exercise_value)
+
+                #Z[:, i-1] = (1 / (self.sigma * np.sqrt(self.dt))) * (X @ (alpha * dW[:, i-1]))
+
+            Y0_samples[k] = np.mean(Y[:, 0])
+            #Z0_samples[k] = np.mean(Z[:, 0])
+
+        return Y0_samples, 0
