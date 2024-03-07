@@ -10,101 +10,92 @@ def main():
     
     parser.add_argument("--S", type=float, default=100.0, help="Stock price")
     parser.add_argument("--K", type=float, default=95.0, help="Strike price")
+    parser.add_argument("--K2", type=float, default=105, help="Second strike price")
     parser.add_argument("--r", type=float, default=0.01, help="Rate")
+    parser.add_argument("--R", type=float, default=0.01, help="Second rate")
+    parser.add_argument("--mu", type=float, default=0.01, help="Drift term on stock")
     parser.add_argument("--sigma", type=float, default=0.2, help="Volatility (sigma)")
-    parser.add_argument("--T", type=float, default=1, help="Time to expiration (in years)")
-    parser.add_argument("--N", type=int, default=252, help="Number of time steps")
-    parser.add_argument("--M", type=int, default=100000, help="Number of Monte Carlo simulations")
+    parser.add_argument("--T", type=float, default=0.25, help="Time to expiration (in years)")
+    parser.add_argument("--N", type=int, default=52, help="Number of time steps")
+    parser.add_argument("--M", type=int, default=10000, help="Number of Monte Carlo simulations")
     parser.add_argument("--L", type=float, default=0.025, help="Lower confidence alpha")
     parser.add_argument("--degree", type=int, default=3, help="Degree for regression")
     parser.add_argument("--samples", type=int, default=100, help="Number of sampels of solved BSDEs prices")
     parser.add_argument("--opt_payoff", type=str, choices=['call', 'put'],
                         default='call', help="Option payoff (either 'call' or 'put')")
     parser.add_argument("--opt_style", type=str, choices=['european',
-                                                          'american'],
-                        default='european', help="Option style (either 'european' or 'american')")
-    args = parser.parse_args()
+                                                          'american',
+                                                          'europeanspread',
+                                                          'americanspread'],
+                                                            
+                        default='european', help="Option style (either 'european','american', 'europeanspread' or 'americanspread')")
 
+    args = parser.parse_args()
+    degrees = list(range(3, 20))
     if args.opt_style == 'european':
         euro_opt = BSDEOptionPricingEuropean(args.S, args.K, args.r, args.sigma,
                                             args.T, args.N, args.M, args.L,
                                              args.samples, args.opt_payoff,
-                                             args.degree)
+                                             args.degree, args.mu)
         euro_opt.run()
-        price = black_scholes(args.S, args.K, args.T, args.r, args.sigma,
-                              args.opt_payoff)
-        print(f"European {args.opt_payoff} option price: {price:.2f}")
+        euro_opt.plot_and_show_table_by_degree(degrees)
+        price = black_scholes(args.S, args.K, args.T, args.mu, args.sigma,
+                                args.opt_payoff)
+        print(f"European {args.opt_payoff} option price: {price:.4f}")
     elif args.opt_style == 'american':
         american_opt = BSDEOptionPricingAmerican(args.S, args.K, args.r,
                                                 args.sigma, args.T, args.N,
                                                  args.M, args.L, args.samples,
                                                  args.opt_payoff, args.degree)
         american_opt.run()
-        price = longstaff_schwartz(args.S, args.K, args.r, args.sigma, args.T,
-                                   args.N, args.M, args.opt_payoff)
-        print(f"American {args.opt_payoff} option price: {price:.2f}")
+        american_opt.plot_and_show_table_by_degree(degrees)
+    elif args.opt_style == 'europeanspread':
+        euro_opt_spread = BSDEOptionPricingEuropeanSpread(args.S, args.K, args.r, args.sigma,
+                                            args.T, args.N, args.M, args.L,
+                                             args.samples, args.opt_payoff,
+                                             args.degree, args.mu, args.K2, args.R)
+        euro_opt_spread.run()
+        price = black_scholes_call_spread(args.S, args.K, args.K2, args.T, args.r, args.R, args.sigma)
+                                
+        print(f"European {args.opt_payoff} option spread price: {price:.4f}")
+    elif args.opt_style == 'americanspread':
+        american_opt_spread = BSDEOptionPricingAmericanSpread(args.S, args.K, args.r, args.sigma,
+                                            args.T, args.N, args.M, args.L,
+                                             args.samples, args.opt_payoff,
+                                             args.degree, args.mu, args.K2, args.R)
+        american_opt_spread.run()
+        american_opt_spread.plot_and_show_table_by_degree(degrees)
     else:
         raise ValueError(f"Option style should be either european or american, not {args.opt_style}!")
     
-
-
-def black_scholes(S, K, T, r, sigma, opt_payoff):
+def black_scholes(S, K, T, mu, sigma, opt_payoff):
     """ Calculates an european option using the analytical blach-scholes
     formula """
     N = norm.cdf
-    d1 = (np.log(S/K) + (r + sigma**2/2)*T) / (sigma*np.sqrt(T))
+    d1 = (np.log(S/K) + (mu + sigma**2/2)*T) / (sigma*np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
     if opt_payoff == 'call':
-        return S * N(d1) - K * np.exp(-r*T)* N(d2)
+        return S * N(d1) - K * np.exp(-mu*T)* N(d2)
     else:
-        return K*np.exp(-r*T)*N(-d2) - S * N(-d1)
+        return K*np.exp(-mu*T)*N(-d2) - S * N(-d1)
 
-def longstaff_schwartz(S, K, r, sigma, T, N, M, option_type='put', seed=None):
-    if M < 1e4:
-        M = int(1e5) 
-    if seed is not None:
-        np.random.seed(seed)
+def black_scholes_call_spread(S, K1, K2, T, r, R, sigma):
+    """Calculates a European call spread option price using the analytical Black-Scholes formula."""
+    N = norm.cdf  
+
+    d1_K1 = (np.log(S / K1) + (r + sigma**2 / 2) * T) / (sigma * np.sqrt(T))
+    d2_K1 = d1_K1 - sigma * np.sqrt(T)
     
-    dt = T / N
-    discount_factor = np.exp(-r * dt)
+    d1_K2 = (np.log(S / K2) + (R + sigma**2 / 2) * T) / (sigma * np.sqrt(T))
+    d2_K2 = d1_K2 - sigma * np.sqrt(T)
+
+    call_price_K1 = S * N(d1_K1) - K1 * np.exp(-r * T) * N(d2_K1)
+    call_price_K2 = S * N(d1_K2) - K2 * np.exp(-R * T) * N(d2_K2)
     
-    stock_paths = np.zeros((M, N+1))
-    stock_paths[:, 0] = S
-    for t in range(1, N+1):
-        Z = np.random.normal(size=M)
-        stock_paths[:, t] = stock_paths[:, t-1] * np.exp((r - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * Z)
-    
-    if option_type == 'put':
-        option_values = np.maximum(K - stock_paths, 0)
-    elif option_type == 'call':
-        option_values = np.maximum(stock_paths - K, 0)
-    else:
-        raise ValueError("Invalid option_type: choose either 'put' or 'call'")
-    
-    for t in range(N-1, 0, -1):
-        itm_indices = np.where(option_values[:, t] > 0)[0]  # Indices where the option i
-        stock_prices_itm = stock_paths[itm_indices, t]
-        option_values_itm = option_values[itm_indices, t+1] * discount_factor  # Discounted one step forward
-        
-        # Step 4: Regression to estimate continuation value
-        X = poly.polyvander(stock_prices_itm, 2)  # 2nd degree polynomial for basis functions
-        regression_coeffs = np.linalg.lstsq(X, option_values_itm, rcond=None)[0]
-        continuation_values = X @ regression_coeffs
-        
-        # Step 5: Decide whether to exercise early
-        intrinsic_values = np.maximum(K - stock_prices_itm if option_type == 'put' else stock_prices_itm - K, 0)
-        exercise = intrinsic_values > continuation_values
-        
-        # Update option values where early exercise is optimal
-        option_values[itm_indices[exercise], t] = intrinsic_values[exercise]
-        
-        # Discount the option values from time t back to t-1
-        option_values[:, t-1] = np.where(option_values[:, t] > 0, option_values[:, t], option_values[:, t-1])
-        option_values[:, t-1] *= discount_factor  # Apply discounting
-    
-    # Step 6: Estimate the option price as the discounted mean of the option values at the first time step
-    option_price = np.mean(option_values[:, 1]) * discount_factor  # Only discount once from t=1 to t=0
-    return option_price
+    call_spread_price = call_price_K1 - 2*call_price_K2
+
+    return call_spread_price
+
 
 
 if __name__ == '__main__':
