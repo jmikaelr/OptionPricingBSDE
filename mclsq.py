@@ -209,7 +209,7 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
 
             Y0_samples[k] = np.mean(Y[:, 0])
 
-        return Y0_samples, 0
+        return Y0_samples
 
 
 class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
@@ -290,4 +290,4 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingAmerican):
             Z0_samples[k] = np.mean(Z[:, 1])
 
 
-        return Y0_samples, 0
+        return Y0_samples
