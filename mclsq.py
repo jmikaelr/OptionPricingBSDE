@@ -35,7 +35,7 @@ class BSDEOptionPricingEuropean:
         self.K = K
         self.T = T
         self.r = r
-        self.mu = mu
+        self.mu = r if mu is None else mu
         self.sigma = sigma
         self.N = N
         self.M = M
@@ -44,7 +44,7 @@ class BSDEOptionPricingEuropean:
         self.dt = T / N
         self.samples = samples
         self.lower = lower
-        self.lamb = (mu - r)/(sigma)
+        self.lamb = (mu - r)/(sigma) if mu is not None else 0
         self.picard = picard
 
     def _get_opt_payoff(self, opt_payoff):
