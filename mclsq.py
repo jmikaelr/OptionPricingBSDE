@@ -69,8 +69,8 @@ class BSDEOptionPricingEuropean:
 
     def _generate_regression(self, S):
         """ Generates Laguerre polynomials up to degree self.degree """
-        if self.degree > 20 or self.degree < 1:
-            raise ValueError(f"Invalid degree on Polynomial basis, you chose: {self.degree}, choose between 1 and 10")
+        if self.degree > 50 or self.degree < 1:
+            raise ValueError(f"Invalid degree on Polynomial basis, you chose: {self.degree}, choose between 1 and 250")
         
         S_expanded = np.expand_dims(S, axis=-1)   
         basis_polynomials = np.array([np.polynomial.laguerre.Laguerre.basis(deg)(S_expanded) for deg in range(self.degree + 1)])
@@ -104,7 +104,7 @@ class BSDEOptionPricingEuropean:
 
             Y0_samples[k] = np.mean(Y[:, 0])
 
-        return Y0_samples, 0
+        return Y0_samples 
 
     def _confidence_interval(self, sample):
         """ Calculates the confidence interval with lower limit self.lower """
@@ -115,45 +115,76 @@ class BSDEOptionPricingEuropean:
         CI = [round(lower,4), round(upper,4)]
         return mean_sample, std_sample, CI
 
-
-    def plot_and_show_table_by_degree(self, degrees, option_type='call'):
+    def plot_and_show_table_by_degree(self, degrees, opt_style = 'european'):
         prices = []
         errors = []
         rows = []
-        
         for degree in degrees:
-            self.degree = degree  
-            Y0_array, _ = self._bsde_solver()
+            self.degree = degree
+            Y0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             prices.append(est_Y0)
             errors.append(std_Y0)
             rows.append([degree, est_Y0, std_Y0, CI_Y[0], CI_Y[1]])
         
+            print(f'Done with degree {degree}.')
+        mean_price = np.mean(prices)
+                
         plt.errorbar(degrees, prices, yerr=errors, fmt='-o', capsize=5, capthick=2, ecolor='red', label='Option Price')
+        
+        plt.plot(degrees, [mean_price] * len(degrees), 'g--', label='Mean Price')
+        
+        plt.scatter(degrees, [mean_price] * len(degrees), color='green', marker='x', s=100, label='Mean Price Marker')
+        
         plt.xlabel('Degree of Laguerre Polynomials')
         plt.ylabel('Option Price')
         plt.title('Option Price vs. Degree of Laguerre Polynomials')
         plt.legend()
         plt.grid(True)
+        
+        plot_directory = './plots'
+        if not os.path.exists(plot_directory):
+            os.mkdir('plots')
+
+        table_directory = './tables'
+        if not os.path.exists(table_directory):
+            os.mkdir(table_directory)
+
+        match opt_style:
+            case 'european':
+                plot_name = f'european_{self.option_payoff}_{len(degrees)+1}.png'
+                table_name = f'european_{self.option_payoff}_{len(degrees)+1}.csv'
+            case 'american':
+                plot_name = f'american_{self.option_payoff}_{len(degrees)+1}.png'
+                table_name = f'american_{self.option_payoff}_{len(degrees)+1}.csv'
+            case 'europeanspread':
+                plot_name = f'european_spread_{self.option_payoff}_{len(degrees)+1}.png'
+                table_name = f'european_spread_{self.option_payoff}_{len(degrees)+1}.csv'
+            case 'americanspread':
+                plot_name = f'americanspread_{self.option_payoff}_{len(degrees)+1}.png'
+                table_name = f'americanspread_{self.option_payoff}_{len(degrees)+1}.csv'
+
+        plot_path = os.path.join(plot_directory, plot_name)
+        plt.savefig(plot_path)
         plt.show()
         
+
         df = pd.DataFrame(rows, columns=['Degree', 'Estimated Price', 'Std. Deviation', 'CI Lower Bound', 'CI Upper Bound'])
+        table_path = os.path.join(table_directory, table_name)
+        df.to_csv(table_path, index=False)
         print(df)
+        print(f"Mean Price across all degrees: {mean_price:.4f}")
 
     def run(self):
         """ Method called to run the program and solve the BSDE """
-        start_timer = time.time()
-        Y0_array, Z0_array = self._bsde_solver()
+        Y0_array = self._bsde_solver()
         finished_time = time.time() - start_timer
         est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
-        est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
         print(f"\nBSDE solved in: {finished_time:.2f} seconds"
                 f"\nEstimated option price: {est_Y0:.4f}"
                 f"\nWith standard deviation: {std_Y0:.4f}"
                 f"\nConfidence interval: {CI_Y}"
-                f"\nEstimated hedge strategy: {est_Z0:.4f}"
-                f"\nWith standard deviation: {std_Z0:.4f}"
-                f"\nConfidence interval: {CI_Z}")
+              )
 
 class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
 
@@ -178,7 +209,7 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
 
             Y0_samples[k] = np.mean(Y[:, 0])
 
-        return Y0_samples, 0
+        return Y0_samples
 
 
 class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
@@ -191,7 +222,7 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
         if self.option_payoff == "call":
             return np.maximum(S - self.K, 0) - 2*np.maximum(S - self.K2, 0) 
         else:
-            raise ValueError(f"Invalid option type: {self.option_type}. Supported types are 'call' and 'put'.")
+            raise ValueError(f"Invalid option type: {self.option_type}. Supported types are 'call'.")
 
     def _bsde_solver(self):
         """ Solves the BSDE equation for an european option using Cholesky Decomposition"""
@@ -216,7 +247,7 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
 
             Y0_samples[k] = np.mean(Y[:, 0])
 
-        return Y0_samples, 0
+        return Y0_samples
 
 
 class BSDEOptionPricingAmericanSpread(BSDEOptionPricingAmerican):
@@ -256,7 +287,6 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingAmerican):
                 Y[:, i-1] = np.maximum(exercise_value, Y[:, i-1])
                 
             Y0_samples[k] = np.mean(Y[:, 0])
-            Z0_samples[k] = np.mean(Z[:, 1])
 
 
-        return Y0_samples, 0
+        return Y0_samples
