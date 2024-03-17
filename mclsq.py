@@ -71,7 +71,7 @@ class BSDEOptionPricingEuropean:
         """ Generates Laguerre polynomials up to degree self.degree """
         if self.degree > 50 or self.degree < 1:
             raise ValueError(f"Invalid degree on Polynomial basis, you chose: {self.degree}, choose between 1 and 250")
-        
+            raise ValueError(f"Invalid degree on Polynomial basis, you chose: {self.degree}, choose between 1 and 20")
         S_expanded = np.expand_dims(S, axis=-1)   
         basis_polynomials = np.array([np.polynomial.laguerre.Laguerre.basis(deg)(S_expanded) for deg in range(self.degree + 1)])
         Mk = np.transpose(basis_polynomials, (1, 2, 0)).reshape(S.shape[0], self.degree + 1)
@@ -126,7 +126,6 @@ class BSDEOptionPricingEuropean:
             prices.append(est_Y0)
             errors.append(std_Y0)
             rows.append([degree, est_Y0, std_Y0, CI_Y[0], CI_Y[1]])
-        
             print(f'Done with degree {degree}.')
         mean_price = np.mean(prices)
                 
@@ -141,7 +140,6 @@ class BSDEOptionPricingEuropean:
         plt.title('Option Price vs. Degree of Laguerre Polynomials')
         plt.legend()
         plt.grid(True)
-        
         plot_directory = './plots'
         if not os.path.exists(plot_directory):
             os.mkdir('plots')
@@ -177,6 +175,7 @@ class BSDEOptionPricingEuropean:
 
     def run(self):
         """ Method called to run the program and solve the BSDE """
+        start_timer = time.time()
         Y0_array = self._bsde_solver()
         finished_time = time.time() - start_timer
         est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
@@ -287,6 +286,5 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingAmerican):
                 Y[:, i-1] = np.maximum(exercise_value, Y[:, i-1])
                 
             Y0_samples[k] = np.mean(Y[:, 0])
-
 
         return Y0_samples

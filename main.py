@@ -1,6 +1,7 @@
 from mclsq import *
 import numpy as np
 from scipy.stats import norm
+import numpy.polynomial.polynomial as poly
 import argparse
 import os
 
@@ -26,8 +27,7 @@ def main():
                                                           'american',
                                                           'europeanspread',
                                                           'americanspread'],
-                                                            
-                        default='european', help="Option style (either 'european','american', 'europeanspread' or 'americanspread')")
+                                                            default='european', help="Option style (either 'european','american', 'europeanspread' or 'americanspread')")
 
     parser.add_argument("--plot", default=False, action='store_true') 
     parser.add_argument("--degrees", type=int, default=3, help="Up to what degree to plot and generate table to")
@@ -64,7 +64,6 @@ def main():
                                             args.T, args.N, args.M, args.L,
                                              args.samples, args.opt_payoff,
                                              args.degree, args.mu, args.K2, args.R)
-                                
         if args.plot:
             euro_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style)
         else:
@@ -76,7 +75,6 @@ def main():
                                             args.T, args.N, args.M, args.L,
                                              args.samples, args.opt_payoff,
                                              args.degree, args.mu, args.K2, args.R)
-
         if args.plot:
             american_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style)
         else:
@@ -92,10 +90,6 @@ def black_scholes(S, K, T, mu, sigma, opt_payoff):
     d2 = d1 - sigma * np.sqrt(T)
     if opt_payoff == 'call':
         return S * N(d1) - K * np.exp(-mu*T)* N(d2)
-        if args.plot:
-            american_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style)
-        else:
-            american_opt_spread.run()
     else:
         raise ValueError(f"Option style should be either european or american, not {args.opt_style}!")
     
