@@ -25,49 +25,51 @@ readonly M_VALUES=(128 512 2048 8192 32768)
 
 readonly N1=20
 readonly N2=50
+readonly N3=5
+readonly N4=10
 
 for M in "${M_VALUES[@]}"; do
-    nohup python3 main.py --S "$STOCK" --K "$STRIKE" --sigma "$SIGMA" --r "$RATE" --T "$MATURITY" --samples "$SAMPLES" --N "$N1" --M "$M" --plot --degrees 20 --opt_style european --nofig >/dev/null 2>&1 &
+     python3 main.py --S "$STOCK" --K "$STRIKE" --sigma "$SIGMA" --r "$RATE" --T "$MATURITY" --samples "$SAMPLES" --N "$N3" --M "$M" --plot --degrees 20 --opt_style european --nofig 
 done
 
 wait_for_jobs
 
 for M in "${M_VALUES[@]}"; do
-    nohup python3 main.py --S "$STOCK" --K "$STRIKE" --sigma "$SIGMA" --r "$RATE" --T "$MATURITY" --samples "$SAMPLES" --N "$N2" --M "$M" --plot --degrees 20 --opt_style european --nofig >/dev/null 2>&1 &
+     python3 main.py --S "$STOCK" --K "$STRIKE" --sigma "$SIGMA" --r "$RATE" --T "$MATURITY" --samples "$SAMPLES" --N "$N4" --M "$M" --plot --degrees 20 --opt_style european --nofig 
 done
 
 wait_for_jobs
 
 for M in "${M_VALUES[@]}"; do
-    nohup python3 main.py --S "$STOCK" --K "$STRIKE" --sigma "$SIGMA" --r "$RATE" --T "$MATURITY" --samples "$SAMPLES" --N "$N1" --M "$M" --plot --degrees 20 --opt_style american --nofig >/dev/null 2>&1 &
+     python3 main.py --S "$STOCK" --K "$STRIKE" --sigma "$SIGMA" --r "$RATE" --T "$MATURITY" --samples "$SAMPLES" --N "$N1" --M "$M" --plot --degrees 20 --opt_style american --nofig 
 done
 
 wait_for_jobs
 
 for M in "${M_VALUES[@]}"; do
-    nohup python3 main.py --S "$STOCK" --K "$STRIKE" --sigma "$SIGMA" --r "$RATE" --T "$MATURITY" --samples "$SAMPLES" --N "$N2" --M "$M" --plot --degrees 20 --opt_style american --nofig >/dev/null 2>&1 &
+     python3 main.py --S "$STOCK" --K "$STRIKE" --sigma "$SIGMA" --r "$RATE" --T "$MATURITY" --samples "$SAMPLES" --N "$N2" --M "$M" --plot --degrees 20 --opt_style american --nofig 
 done
 
 wait_for_jobs
 
 for M in "${M_VALUES[@]}"; do
-    nohup python3 main.py --S "$STOCK" --K "$STRIKE_1" --sigma "$SIGMA" --r "$RATE_1" --R "$RATE_2" --T "$MATURITY" --K2 "$STRIKE_2" --mu "$MEAN" --samples "$SAMPLES" --N "$N1" --M "$M" --plot --degrees 20 --opt_style europeanspread --nofig >/dev/null 2>&1 &
+     python3 main.py --S "$STOCK" --K "$STRIKE_1" --sigma "$SIGMA" --r "$RATE_1" --R "$RATE_2" --T "$MATURITY" --K2 "$STRIKE_2" --mu "$MEAN" --samples "$SAMPLES" --N "$N1" --M "$M" --plot --degrees 20 --opt_style europeanspread --nofig 
 done
 
 wait_for_jobs
 
 for M in "${M_VALUES[@]}"; do
-    nohup python3 main.py --S "$STOCK" --K "$STRIKE_1" --sigma "$SIGMA" --r "$RATE_1" --R "$RATE_2" --T "$MATURITY" --K2 "$STRIKE_2" --mu "$MEAN" --samples "$SAMPLES" --N "$N2" --M "$M" --plot --degrees 20 --opt_style europeanspread --nofig >/dev/null 2>&1 &
+     python3 main.py --S "$STOCK" --K "$STRIKE_1" --sigma "$SIGMA" --r "$RATE_1" --R "$RATE_2" --T "$MATURITY" --K2 "$STRIKE_2" --mu "$MEAN" --samples "$SAMPLES" --N "$N2" --M "$M" --plot --degrees 20 --opt_style europeanspread --nofig 
 done
 
 wait_for_jobs
 
 for M in "${M_VALUES[@]}"; do
-    nohup python3 main.py --S "$STOCK" --K "$STRIKE_1" --sigma "$SIGMA" --r "$RATE_1" --R "$RATE_2" --T "$MATURITY" --K2 "$STRIKE_2" --mu "$MEAN" --samples "$SAMPLES" --N "$N1" --M "$M" --plot --degrees 20 --opt_style americanspread --nofig >/dev/null 2>&1 &
+     python3 main.py --S "$STOCK" --K "$STRIKE_1" --sigma "$SIGMA" --r "$RATE_1" --R "$RATE_2" --T "$MATURITY" --K2 "$STRIKE_2" --mu "$MEAN" --samples "$SAMPLES" --N "$N1" --M "$M" --plot --degrees 20 --opt_style americanspread --nofig 
 done
 
 wait_for_jobs
 
 for M in "${M_VALUES[@]}"; do
-    nohup python3 main.py --S "$STOCK" --K "$STRIKE_1" --sigma "$SIGMA" --r "$RATE_1" --R "$RATE_2" --T "$MATURITY" --K2 "$STRIKE_2" --mu "$MEAN" --samples "$SAMPLES" --N "$N2" --M "$M" --plot --degrees 20 --opt_style americanspread --nofig >/dev/null 2>&1 &
+     python3 main.py --S "$STOCK" --K "$STRIKE_1" --sigma "$SIGMA" --r "$RATE_1" --R "$RATE_2" --T "$MATURITY" --K2 "$STRIKE_2" --mu "$MEAN" --samples "$SAMPLES" --N "$N2" --M "$M" --plot --degrees 20 --opt_style americanspread --nofig 
 done
