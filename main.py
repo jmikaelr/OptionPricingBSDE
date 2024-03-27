@@ -1,9 +1,7 @@
 from mclsq import *
 import numpy as np
 from scipy.stats import norm
-import numpy.polynomial.polynomial as poly
 import argparse
-import os
 
 def main():
     parser = argparse.ArgumentParser(description="Option Pricing using BSDE and Longstaff Schwartz")
@@ -18,7 +16,7 @@ def main():
     parser.add_argument("--T", type=float, default=0.25, help="Time to expiration (in years)")
     parser.add_argument("--N", type=int, default=252, help="Number of time steps")
     parser.add_argument("--M", type=int, default=100000, help="Number of Monte Carlo simulations")
-    parser.add_argument("--L", type=float, default=0.025, help="Lower confidence alpha")
+    parser.add_argument("--L", type=float, default=0.025, help="confidence alpha")
     parser.add_argument("--degree", type=int, default=3, help="Degree for regression")
     parser.add_argument("--samples", type=int, default=10, help="Number of sampels of solved BSDEs prices")
     parser.add_argument("--opt_payoff", type=str, choices=['call', 'put'],
@@ -31,9 +29,9 @@ def main():
 
     parser.add_argument("--plot", default=False, action='store_true') 
     parser.add_argument("--degrees", type=int, default=3, help="Up to what degree to plot and generate table to")
-
+     
     args = parser.parse_args()
-    if args.plot and args.degrees > args.degree:
+    if args.plot and args.degrees > args.degree and args.degrees < 30:
         degrees = list(range(2,args.degrees + 1))
     elif args.plot:
         degrees  = list(range(2, 5))
@@ -42,12 +40,11 @@ def main():
                                             args.T, args.N, args.M, args.L,
                                              args.samples, args.opt_payoff,
                                              args.degree, args.mu)
+        price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
         if args.plot:
-            euro_opt.plot_and_show_table_by_degree(degrees, args.opt_style)
+            euro_opt.plot_and_show_table_by_degree(degrees, args.opt_style, price)
         else:
             euro_opt.run()
-            price = black_scholes(args.S, args.K, args.T, args.r, args.sigma,
-                                    args.opt_payoff)
             print(f"European {args.opt_payoff} option price: {price:.4f}")
     elif args.opt_style == 'american':
         american_opt = BSDEOptionPricingAmerican(args.S, args.K, args.r,
@@ -95,7 +92,7 @@ def black_scholes(S, K, T, r, sigma, opt_payoff):
     if opt_payoff == 'call':
         return S * N(d1) - K * np.exp(-r*T)* N(d2)
     elif opt_payoff == 'put':
-        return K*np.exp(-mu*T)*N(-d2) - S * N(-d1)
+        return K*np.exp(-r*T)*N(-d2) - S * N(-d1)
     else:
         raise ValueError(f'Invalid payoff {opt_payoff}, it must be either "call" or "put"')
 

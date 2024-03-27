@@ -1,16 +1,13 @@
 import time
 import pandas as pd
-import scipy
 import os
-from datetime import datetime
 import numpy as np
-from scipy.linalg import cholesky
 from scipy.stats import norm
-from scipy.special import laguerre
+from main import black_scholes
 import matplotlib.pyplot as plt
 
 class BSDEOptionPricingEuropean:
-    def __init__(self, S0, K, r, sigma, T, N, M, lower = 0.025, samples = 100,
+    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level = 0.025, samples = 100,
                  option_payoff="call", degree = 3, mu = 0.05, picard = 3):
         if not isinstance(S0, (int, float)) or S0 <= 0:
             raise ValueError('S0 must be positive.')
@@ -23,12 +20,12 @@ class BSDEOptionPricingEuropean:
         if not isinstance(sigma, (int, float)) or sigma <= 0:
             raise ValueError('sigma must be positive.')
         if not isinstance(N, int) or N <= 0:
-            raise ValueError('N must be a positive integer.')
+            raise ValueError('N must be a positive integer or float.')
         if not isinstance(M, int) or M <= 0:
             raise ValueError('M must be a positive integer.')
         if not isinstance(degree, int) or degree < 0:
             raise ValueError('degree must be a non-negative integer.')
-        if not isinstance(lower, float):
+        if not isinstance(confidence_level, float):
             raise ValueError('Lower confidence number msut be a float!')
 
         self.S0 = S0
@@ -43,7 +40,7 @@ class BSDEOptionPricingEuropean:
         self.degree = degree
         self.dt = T / N
         self.samples = samples
-        self.lower = lower
+        self.confidence_level = confidence_level
         self.lamb = (mu - r)/(sigma) if mu is not None else 0
         self.picard = picard
 
@@ -65,7 +62,7 @@ class BSDEOptionPricingEuropean:
         elif self.option_payoff == "put":
             return np.maximum(self.K - S, 0)
         else:
-            raise ValueError(f"Invalid option type: {self.option_type}. Supported types are 'call' and 'put'.")
+            raise ValueError(f"Invalid option type: {self.option_payoff}. Supported types are 'call' and 'put'.")
 
     def _generate_regression(self, S):
         """ Generates Laguerre polynomials up to degree self.degree """
@@ -90,7 +87,7 @@ class BSDEOptionPricingEuropean:
         Y0_samples = np.zeros(self.samples)
 
         for k in range(self.samples):
-            S, dW = self._generate_stock_paths()
+            S, _ = self._generate_stock_paths()
             Y = np.zeros((self.M, self.N + 1))
 
             Y[:, -1] = self._payoff_func(S[:, -1])
@@ -107,15 +104,15 @@ class BSDEOptionPricingEuropean:
         return Y0_samples 
 
     def _confidence_interval(self, sample):
-        """ Calculates the confidence interval with lower limit self.lower """
+        """ Calculates the confidence interval with confidence_level """ 
         mean_sample = np.mean(sample)
-        std_sample = np.std(sample)
-        upper = mean_sample + norm.ppf(1-self.lower/2) * std_sample/np.sqrt(self.M)
-        lower = mean_sample - norm.ppf(1-self.lower/2) * std_sample/np.sqrt(self.M)
+        std_sample = np.std(sample, ddof=1)
+        upper = mean_sample + norm.ppf(1-self.confidence_level/2) * std_sample/np.sqrt(self.samples)
+        lower = mean_sample - norm.ppf(1-self.confidence_level/2) * std_sample/np.sqrt(self.samples)
         CI = [round(lower,4), round(upper,4)]
         return mean_sample, std_sample, CI
 
-    def plot_and_show_table_by_degree(self, degrees, opt_style = 'european'):
+    def plot_and_show_table_by_degree(self, degrees, opt_style = 'european', bs_price = None):
         prices = []
         errors = []
         rows = []
@@ -132,9 +129,14 @@ class BSDEOptionPricingEuropean:
         plt.errorbar(degrees, prices, yerr=errors, fmt='-o', capsize=5, capthick=2, ecolor='red', label='Option Price')
         
         plt.plot(degrees, [mean_price] * len(degrees), 'g--', label='Mean Price')
+        if opt_style == 'european':
+            plt.plot(degrees, [bs_price] * len(degrees), 'k-', label='Black-Scholes')
+            plt.scatter(degrees, [bs_price] * len(degrees), color='black', marker='_', s=100)
         
-        plt.scatter(degrees, [mean_price] * len(degrees), color='green', marker='x', s=100, label='Mean Price Marker')
+        plt.scatter(degrees, [mean_price] * len(degrees), color='green', marker='x', s=100)
         
+        plt.xticks(range(min(degrees), max(degrees)+1))
+
         plt.xlabel('Degree of Laguerre Polynomials')
         plt.ylabel('Option Price')
         plt.title('Option Price vs. Degree of Laguerre Polynomials')
@@ -150,17 +152,19 @@ class BSDEOptionPricingEuropean:
 
         match opt_style:
             case 'european':
-                plot_name = f'european_{self.option_payoff}_{len(degrees)+1}.png'
-                table_name = f'european_{self.option_payoff}_{len(degrees)+1}.csv'
+                plot_name = f'{opt_style}_{self.option_payoff}_{self.N}-{self.M}_{len(degrees)+1}.png'
+                table_name = f'{opt_style}_{self.option_payoff}_{self.N}-{self.M}_{len(degrees)+1}.csv'
             case 'american':
-                plot_name = f'american_{self.option_payoff}_{len(degrees)+1}.png'
-                table_name = f'american_{self.option_payoff}_{len(degrees)+1}.csv'
+                plot_name = f'{opt_style}_{self.option_payoff}_{self.N}-{self.M}_{len(degrees)+1}.png'
+                table_name = f'{opt_style}_{self.option_payoff}_{self.N}-{self.M}_{len(degrees)+1}.csv'
             case 'europeanspread':
-                plot_name = f'european_spread_{self.option_payoff}_{len(degrees)+1}.png'
-                table_name = f'european_spread_{self.option_payoff}_{len(degrees)+1}.csv'
+                plot_name = f'{opt_style}_{self.option_payoff}_{self.N}-{self.M}_{len(degrees)+1}.png'
+                table_name = f'{opt_style}_{self.option_payoff}_{self.N}-{self.M}_{len(degrees)+1}.csv'
             case 'americanspread':
-                plot_name = f'americanspread_{self.option_payoff}_{len(degrees)+1}.png'
-                table_name = f'americanspread_{self.option_payoff}_{len(degrees)+1}.csv'
+                plot_name = f'{opt_style}_{self.option_payoff}_{self.N}-{self.M}_{len(degrees)+1}.png'
+                table_name = f'{opt_style}_{self.option_payoff}_{self.N}-{self.M}_{len(degrees)+1}.csv'
+            case _:
+                raise ValueError('Invalid option style')
 
         plot_path = os.path.join(plot_directory, plot_name)
         plt.savefig(plot_path)
@@ -172,6 +176,7 @@ class BSDEOptionPricingEuropean:
         df.to_csv(table_path, index=False)
         print(df)
         print(f"Mean Price across all degrees: {mean_price:.4f}")
+        print(f"European {self.option_payoff} option price: {bs_price:.4f}")
 
     def run(self):
         """ Method called to run the program and solve the BSDE """
@@ -192,7 +197,7 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
         Y0_samples = np.zeros(self.samples)
 
         for k in range(self.samples):
-            S, dW = self._generate_stock_paths()
+            S, _ = self._generate_stock_paths()
             Y = np.zeros((self.M, self.N + 1))
 
             Y[:, -1] = self._payoff_func(S[:, -1])
@@ -212,8 +217,8 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
 
 
 class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
-    def __init__(self, S0, K, r, sigma, T, N, M, lower, samples, option_payoff, degree, mu, K2, R):
-        super().__init__(S0, K, r, sigma, T, N, M, lower, samples, option_payoff, degree, mu)
+    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, option_payoff, degree, mu, K2, R):
+        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, option_payoff, degree, mu)
         self.K2 = 105 if K2 is None else K2 
         self.R = 0.06 if R is None else R 
 
@@ -221,7 +226,7 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
         if self.option_payoff == "call":
             return np.maximum(S - self.K, 0) - 2*np.maximum(S - self.K2, 0) 
         else:
-            raise ValueError(f"Invalid option type: {self.option_type}. Supported types are 'call'.")
+            raise ValueError(f"Invalid option type: {self.option_payoff}. Supported types are 'call'.")
 
     def _bsde_solver(self):
         """ Solves the BSDE equation for an european option using Cholesky Decomposition"""
@@ -250,8 +255,8 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
 
 
 class BSDEOptionPricingAmericanSpread(BSDEOptionPricingAmerican):
-    def __init__(self, S0, K, r, sigma, T, N, M, lower, samples, option_payoff, degree, mu, K2, R):
-        super().__init__(S0, K, r, sigma, T, N, M, lower, samples, option_payoff, degree, mu)
+    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, option_payoff, degree, mu, K2, R):
+        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, option_payoff, degree, mu)
         self.K2 = 105 if K2 is None else K2 
         self.R = 0.06 if R is None else R 
 
@@ -259,12 +264,11 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingAmerican):
         if self.option_payoff == "call":
             return np.maximum(S - self.K, 0) - np.maximum(S - self.K2, 0) 
         else:
-            raise ValueError(f"Invalid option type: {self.option_type}. Supported types are 'call'.")
+            raise ValueError(f"Invalid option type: {self.option_payoff}. Supported types are 'call'.")
 
     def _bsde_solver(self):
         """ Solves the BSDE equation for an european option using Cholesky Decomposition"""
         Y0_samples = np.zeros(self.samples)
-        Z0_samples = np.zeros(self.samples)
 
         for k in range(self.samples):
             S, dW = self._generate_stock_paths()
@@ -288,3 +292,5 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingAmerican):
             Y0_samples[k] = np.mean(Y[:, 0])
 
         return Y0_samples
+
+
