@@ -112,7 +112,7 @@ class BSDEOptionPricingEuropean:
         CI = [round(lower,4), round(upper,4)]
         return mean_sample, std_sample, CI
 
-    def plot_and_show_table_by_degree(self, degrees, opt_style = 'european', bs_price = None):
+    def plot_and_show_table_by_degree(self, degrees, opt_style = 'european', bs_price = None, nofig = False):
         prices = []
         errors = []
         rows = []
@@ -135,7 +135,8 @@ class BSDEOptionPricingEuropean:
         
         plt.scatter(degrees, [mean_price] * len(degrees), color='green', marker='x', s=100)
         
-        plt.xticks(range(min(degrees), max(degrees)+1))
+        tick_positions = np.linspace(degrees[0], degrees[-1], 5, dtype=int)
+        plt.xticks(tick_positions, labels=[str(deg) for deg in tick_positions])
 
         plt.xlabel('Degree of Laguerre Polynomials')
         plt.ylabel('Option Price')
@@ -168,7 +169,8 @@ class BSDEOptionPricingEuropean:
 
         plot_path = os.path.join(plot_directory, plot_name)
         plt.savefig(plot_path)
-        plt.show()
+        if not nofig:
+            plt.show()
         
 
         df = pd.DataFrame(rows, columns=['Degree', 'Estimated Price', 'Std. Deviation', 'CI Lower Bound', 'CI Upper Bound'])

@@ -27,8 +27,9 @@ def main():
                                                           'americanspread'],
                                                             default='european', help="Option style (either 'european','american', 'europeanspread' or 'americanspread')")
 
-    parser.add_argument("--plot", default=False, action='store_true') 
+    parser.add_argument("--plot", default=False, action='store_true', help="Optional to do figures and tables and save them") 
     parser.add_argument("--degrees", type=int, default=3, help="Up to what degree to plot and generate table to")
+    parser.add_argument("--nofig", default=False, action='store_true', help="Optional to show plot or not. It plots by default.")
      
     args = parser.parse_args()
     if args.plot and args.degrees > args.degree and args.degrees < 30:
@@ -42,7 +43,7 @@ def main():
                                              args.degree, args.mu)
         price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
         if args.plot:
-            euro_opt.plot_and_show_table_by_degree(degrees, args.opt_style, price)
+            euro_opt.plot_and_show_table_by_degree(degrees, args.opt_style, price, args.nofig)
         else:
             euro_opt.run()
             print(f"European {args.opt_payoff} option price: {price:.4f}")
@@ -52,7 +53,7 @@ def main():
                                                  args.M, args.L, args.samples,
                                                  args.opt_payoff, args.degree)
         if args.plot:
-            american_opt.plot_and_show_table_by_degree(degrees, args.opt_style)
+            american_opt.plot_and_show_table_by_degree(degrees, args.opt_style, show_plot=args.nofig)
         else:
             american_opt.run()
 
@@ -64,7 +65,7 @@ def main():
                                              args.samples, args.opt_payoff,
                                              args.degree, args.mu, args.K2, args.R)
         if args.plot:
-            euro_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style)
+            euro_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style, show_plot=args.nofig)
         else:
             euro_opt_spread.run()
             price = black_scholes_call_spread(args.S, args.K, args.K2, args.T, args.r, args.R, args.sigma)
@@ -77,7 +78,7 @@ def main():
                                              args.samples, args.opt_payoff,
                                              args.degree, args.mu, args.K2, args.R)
         if args.plot:
-            american_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style)
+            american_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style, show_plot=args.nofig)
         else:
             american_opt_spread.run()
     else:
