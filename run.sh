@@ -1,6 +1,6 @@
 #!/bin/bash
 
-wait_for_jobs() {
+() {
     local job
     for job in $(jobs -p); do
         wait $job || echo "Job $job exited with status $?"
@@ -32,43 +32,43 @@ for M in "${M_VALUES[@]}"; do
      python3 main.py --S "$STOCK" --K "$STRIKE" --sigma "$SIGMA" --r "$RATE" --T "$MATURITY" --samples "$SAMPLES" --N "$N3" --M "$M" --plot --degrees 20 --opt_style european --nofig 
 done
 
-wait_for_jobs
+
 
 for M in "${M_VALUES[@]}"; do
      python3 main.py --S "$STOCK" --K "$STRIKE" --sigma "$SIGMA" --r "$RATE" --T "$MATURITY" --samples "$SAMPLES" --N "$N4" --M "$M" --plot --degrees 20 --opt_style european --nofig 
 done
 
-wait_for_jobs
+
 
 for M in "${M_VALUES[@]}"; do
      python3 main.py --S "$STOCK" --K "$STRIKE" --sigma "$SIGMA" --r "$RATE" --T "$MATURITY" --samples "$SAMPLES" --N "$N1" --M "$M" --plot --degrees 20 --opt_style american --nofig 
 done
 
-wait_for_jobs
+
 
 for M in "${M_VALUES[@]}"; do
      python3 main.py --S "$STOCK" --K "$STRIKE" --sigma "$SIGMA" --r "$RATE" --T "$MATURITY" --samples "$SAMPLES" --N "$N2" --M "$M" --plot --degrees 20 --opt_style american --nofig 
 done
 
-wait_for_jobs
+
 
 for M in "${M_VALUES[@]}"; do
      python3 main.py --S "$STOCK" --K "$STRIKE_1" --sigma "$SIGMA" --r "$RATE_1" --R "$RATE_2" --T "$MATURITY" --K2 "$STRIKE_2" --mu "$MEAN" --samples "$SAMPLES" --N "$N1" --M "$M" --plot --degrees 20 --opt_style europeanspread --nofig 
 done
 
-wait_for_jobs
+
 
 for M in "${M_VALUES[@]}"; do
      python3 main.py --S "$STOCK" --K "$STRIKE_1" --sigma "$SIGMA" --r "$RATE_1" --R "$RATE_2" --T "$MATURITY" --K2 "$STRIKE_2" --mu "$MEAN" --samples "$SAMPLES" --N "$N2" --M "$M" --plot --degrees 20 --opt_style europeanspread --nofig 
 done
 
-wait_for_jobs
+
 
 for M in "${M_VALUES[@]}"; do
      python3 main.py --S "$STOCK" --K "$STRIKE_1" --sigma "$SIGMA" --r "$RATE_1" --R "$RATE_2" --T "$MATURITY" --K2 "$STRIKE_2" --mu "$MEAN" --samples "$SAMPLES" --N "$N1" --M "$M" --plot --degrees 20 --opt_style americanspread --nofig 
 done
 
-wait_for_jobs
+
 
 for M in "${M_VALUES[@]}"; do
      python3 main.py --S "$STOCK" --K "$STRIKE_1" --sigma "$SIGMA" --r "$RATE_1" --R "$RATE_2" --T "$MATURITY" --K2 "$STRIKE_2" --mu "$MEAN" --samples "$SAMPLES" --N "$N2" --M "$M" --plot --degrees 20 --opt_style americanspread --nofig 

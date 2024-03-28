@@ -43,7 +43,7 @@ def main():
                                              args.degree, args.mu)
         price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
         if args.plot:
-            euro_opt.plot_and_show_table_by_degree(degrees, args.opt_style, price, args.nofig)
+            euro_opt.plot_and_show_table_by_degree(degrees, args.opt_style, args.nofig, price)
         else:
             euro_opt.run()
             print(f"European {args.opt_payoff} option price: {price:.4f}")
@@ -53,32 +53,32 @@ def main():
                                                  args.M, args.L, args.samples,
                                                  args.opt_payoff, args.degree)
         if args.plot:
-            american_opt.plot_and_show_table_by_degree(degrees, args.opt_style, show_plot=args.nofig)
+            american_opt.plot_and_show_table_by_degree(degrees, args.opt_style, args.nofig)
         else:
             american_opt.run()
 
     elif args.opt_style == 'europeanspread':
-        if K2 == None or R == None:
+        if args.K2 == None or args.R == None:
             raise ValueError('K2 and R must be set to a value!')
         euro_opt_spread = BSDEOptionPricingEuropeanSpread(args.S, args.K, args.r, args.sigma,
                                             args.T, args.N, args.M, args.L,
                                              args.samples, args.opt_payoff,
                                              args.degree, args.mu, args.K2, args.R)
         if args.plot:
-            euro_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style, show_plot=args.nofig)
+            euro_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style, args.nofig)
         else:
             euro_opt_spread.run()
             price = black_scholes_call_spread(args.S, args.K, args.K2, args.T, args.r, args.R, args.sigma)
             print(f"European {args.opt_payoff} option spread price: {price:.4f}")
     elif args.opt_style == 'americanspread':
-        if K2 == None or R == None:
+        if args.K2 == None or args.R == None:
             raise ValueError('K2 and R must be set to a value!')
         american_opt_spread = BSDEOptionPricingAmericanSpread(args.S, args.K, args.r, args.sigma,
                                             args.T, args.N, args.M, args.L,
                                              args.samples, args.opt_payoff,
                                              args.degree, args.mu, args.K2, args.R)
         if args.plot:
-            american_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style, show_plot=args.nofig)
+            american_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style, args.nofig)
         else:
             american_opt_spread.run()
     else:

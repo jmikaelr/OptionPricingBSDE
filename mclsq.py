@@ -112,7 +112,7 @@ class BSDEOptionPricingEuropean:
         CI = [round(lower,4), round(upper,4)]
         return mean_sample, std_sample, CI
 
-    def plot_and_show_table_by_degree(self, degrees, opt_style = 'european', bs_price = None, nofig = False):
+    def plot_and_show_table_by_degree(self, degrees, opt_style = 'european', nofig = False, bs_price = None):
         prices = []
         errors = []
         rows = []
@@ -178,7 +178,8 @@ class BSDEOptionPricingEuropean:
         df.to_csv(table_path, index=False)
         print(df)
         print(f"Mean Price across all degrees: {mean_price:.4f}")
-        print(f"European {self.option_payoff} option price: {bs_price:.4f}")
+        if bs_price:
+            print(f"European {self.option_payoff} option price: {bs_price:.4f}")
 
     def run(self):
         """ Method called to run the program and solve the BSDE """
