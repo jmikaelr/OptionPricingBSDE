@@ -1,10 +1,10 @@
-from mclsq import *
+from bsde_models import *
 import numpy as np
 from scipy.stats import norm
 import argparse
 
 def main():
-    parser = argparse.ArgumentParser(description="Option Pricing using BSDE and Longstaff Schwartz")
+    parser = argparse.ArgumentParser(description="Option Pricing using BSDE") 
     
     parser.add_argument("--S", type=float, default=100.0, help="Stock price")
     parser.add_argument("--K", type=float, default=95.0, help="Strike price")
@@ -18,72 +18,66 @@ def main():
     parser.add_argument("--M", type=int, default=100000, help="Number of Monte Carlo simulations")
     parser.add_argument("--L", type=float, default=0.025, help="confidence alpha")
     parser.add_argument("--degree", type=int, default=3, help="Degree for regression")
-    parser.add_argument("--samples", type=int, default=10, help="Number of sampels of solved BSDEs prices")
-    parser.add_argument("--opt_payoff", type=str, choices=['call', 'put'],
-                        default='call', help="Option payoff (either 'call' or 'put')")
-    parser.add_argument("--opt_style", type=str, choices=['european',
-                                                          'american',
-                                                          'europeanspread',
-                                                          'americanspread'],
-                                                            default='european', help="Option style (either 'european','american', 'europeanspread' or 'americanspread')")
+    parser.add_argument("--samples", type=int, default=10, help="Number of samples of solved BSDEs prices")
+    parser.add_argument("--opt_payoff", type=str, choices=['call', 'put'], default='call', help="Option payoff (either 'call' or 'put')")
+    parser.add_argument("--opt_style", type=str, choices=['european', 'american', 'europeanspread', 'americanspread'], default='european', help="Option style")
+    parser.add_argument("--nofig", action='store_true', help="Do not show plot. It plots by default.") 
 
-    parser.add_argument("--plot", default=False, action='store_true', help="Optional to do figures and tables and save them") 
-    parser.add_argument("--degrees", type=int, default=3, help="Up to what degree to plot and generate table to")
-    parser.add_argument("--nofig", default=False, action='store_true', help="Optional to show plot or not. It plots by default.")
-     
+    parser.add_argument("--plot_type", type=str, choices = ['N', 'M', 'degrees', 'samples'], default = None, help="What kind of plot, default is no plot.")
+    parser.add_argument("--plot_values", type=str, help="Comma-separated list of values for the selected plot type (e.g., 10,20,30).")
     args = parser.parse_args()
-    if args.plot and args.degrees > args.degree and args.degrees < 30:
-        degrees = list(range(2,args.degrees + 1))
-    elif args.plot:
-        degrees  = list(range(2, 5))
-    if args.opt_style == 'european':
-        euro_opt = BSDEOptionPricingEuropean(args.S, args.K, args.r, args.sigma,
-                                            args.T, args.N, args.M, args.L,
-                                             args.samples, args.opt_payoff,
-                                             args.degree, args.mu)
-        price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
-        if args.plot:
-            euro_opt.plot_and_show_table_by_degree(degrees, args.opt_style, args.nofig, price)
-        else:
-            euro_opt.run()
-            print(f"European {args.opt_payoff} option price: {price:.4f}")
-    elif args.opt_style == 'american':
-        american_opt = BSDEOptionPricingAmerican(args.S, args.K, args.r,
-                                                args.sigma, args.T, args.N,
-                                                 args.M, args.L, args.samples,
-                                                 args.opt_payoff, args.degree)
-        if args.plot:
-            american_opt.plot_and_show_table_by_degree(degrees, args.opt_style, args.nofig)
-        else:
-            american_opt.run()
 
-    elif args.opt_style == 'europeanspread':
-        if args.K2 == None or args.R == None:
-            raise ValueError('K2 and R must be set to a value!')
-        euro_opt_spread = BSDEOptionPricingEuropeanSpread(args.S, args.K, args.r, args.sigma,
-                                            args.T, args.N, args.M, args.L,
-                                             args.samples, args.opt_payoff,
-                                             args.degree, args.mu, args.K2, args.R)
-        if args.plot:
-            euro_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style, args.nofig)
-        else:
-            euro_opt_spread.run()
-            price = black_scholes_call_spread(args.S, args.K, args.K2, args.T, args.r, args.R, args.sigma)
-            print(f"European {args.opt_payoff} option spread price: {price:.4f}")
-    elif args.opt_style == 'americanspread':
-        if args.K2 == None or args.R == None:
-            raise ValueError('K2 and R must be set to a value!')
-        american_opt_spread = BSDEOptionPricingAmericanSpread(args.S, args.K, args.r, args.sigma,
-                                            args.T, args.N, args.M, args.L,
-                                             args.samples, args.opt_payoff,
-                                             args.degree, args.mu, args.K2, args.R)
-        if args.plot:
-            american_opt_spread.plot_and_show_table_by_degree(degrees, args.opt_style, args.nofig)
-        else:
-            american_opt_spread.run()
+    plot_values = [int(x) for x in args.plot_values.split(',')] if args.plot_values else None
+    price = None
+    if args.opt_style in ['european', 'americanspread', 'europeanspread', 'american']:
+        if args.opt_style == 'european':
+            option_pricing_obj = BSDEOptionPricingEuropean(args.S, args.K, args.r, args.sigma,
+                                                           args.T, args.N, args.M, args.L,
+                                                           args.samples, args.opt_payoff,
+                                                           args.degree, args.mu)
+            price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
+        elif args.opt_style == 'american':
+            option_pricing_obj = BSDEOptionPricingAmerican(args.S, args.K, args.r, args.sigma,
+                                                           args.T, args.N, args.M, args.L,
+                                                           args.samples, args.opt_payoff,
+                                                           args.degree)
+        elif args.opt_style == 'europeanspread':
+            option_pricing_obj = BSDEOptionPricingEuropeanSpread(args.S, args.K, args.r, args.sigma,
+                                                                 args.T, args.N, args.M, args.L,
+                                                                 args.samples, args.opt_payoff,
+                                                                 args.degree, args.mu, args.K2, args.R)
+        elif args.opt_style == 'americanspread':
+            option_pricing_obj = BSDEOptionPricingAmericanSpread(args.S, args.K, args.r, args.sigma,
+                                                                 args.T, args.N, args.M, args.L,
+                                                                 args.samples, args.opt_payoff,
+                                                                 args.degree, args.mu, args.K2, args.R)
+        if args.plot_type == "N": 
+            if not plot_values:
+                raise ValueError('No values given in --plot_values!')
+            print(f"Plotting by varying N with values: {args.plot_values}")
+            option_pricing_obj.plot_and_show_table_by_N(plot_values, args.nofig, price)
+        elif args.plot_type == "M":
+            if not plot_values:
+                raise ValueError('No values given in --plot_values!')
+            print(f"Plotting by varying M with values: {args.plot_values}")
+            option_pricing_obj.plot_and_show_table_by_M(plot_values, args.nofig, price)
+        elif args.plot_type == "degrees":
+            if not plot_values:
+                raise ValueError('No values given in --plot_values!')
+            print(f"Plotting by varying degrees with values: {args.plot_values}")
+            option_pricing_obj.plot_and_show_table_by_degree(plot_values, args.nofig, price)
+        elif args.plot_type == 'samples':
+            if not plot_values:
+                raise ValueError('No values given in --plot_values!')
+            print(f"Plotting by varying samples size with values: {args.plot_values}")
+            option_pricing_obj.plot_and_show_table_by_samples(plot_values, args.nofig, price)
+        else:  
+            option_pricing_obj.run()  
+            print(f"{args.opt_style.capitalize()} {args.opt_payoff} option price: {price:.4f}")
     else:
-        raise ValueError(f"Option style should be either european or american, not {args.opt_style}!")
-    
+        raise ValueError('Invalid option: {args.opt_style}')
+
+   
 def black_scholes(S, K, T, r, sigma, opt_payoff):
     """ Calculates an european option using the analytical blach-scholes
     formula """
@@ -96,26 +90,6 @@ def black_scholes(S, K, T, r, sigma, opt_payoff):
         return K*np.exp(-r*T)*N(-d2) - S * N(-d1)
     else:
         raise ValueError(f'Invalid payoff {opt_payoff}, it must be either "call" or "put"')
-
-
-def black_scholes_call_spread(S, K1, K2, T, r, R, sigma):
-    """Calculates a European call spread option price using the analytical Black-Scholes formula."""
-    N = norm.cdf  
-
-    d1_K1 = (np.log(S / K1) + (r + sigma**2 / 2) * T) / (sigma * np.sqrt(T))
-    d2_K1 = d1_K1 - sigma * np.sqrt(T)
-    
-    d1_K2 = (np.log(S / K2) + (R + sigma**2 / 2) * T) / (sigma * np.sqrt(T))
-    d2_K2 = d1_K2 - sigma * np.sqrt(T)
-
-    call_price_K1 = S * N(d1_K1) - K1 * np.exp(-r * T) * N(d2_K1)
-    call_price_K2 = S * N(d1_K2) - K2 * np.exp(-R * T) * N(d2_K2)
-    
-    call_spread_price = call_price_K1 - 2*call_price_K2
-
-    return call_spread_price
-
-
 
 if __name__ == '__main__':
     main()

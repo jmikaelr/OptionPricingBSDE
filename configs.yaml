@@ -1,0 +1,41 @@
+plot_config:
+  plot_and_show_table_by_M:
+    xlabel: "Number of Monte Carlo Simulations (M)"
+    ylabel: "Option Price"
+    title: "Option Price vs. Number of Monte Carlo Simulations (M)"
+    plot_name_template: "{opt_style}_{opt_payoff}_M_{min_value}_to_{max_value}_N_{N}_deg_{degree}.png"
+    table_name_template: "{opt_style}_{opt_payoff}_M_{min_value}_to_{max_value}_N_{N}_deg_{degree}.csv"
+    nofig: False
+
+  plot_and_show_table_by_N:
+    xlabel: "Number of Time Steps (N)"
+    ylabel: "Option Price"
+    title: "Option Price vs. Number of Time Steps (N)"
+    plot_name_template: "{opt_style}_{opt_payoff}_N_{min_value}_to_{max_value}_M_{M}_deg_{degree}.png"
+    table_name_template: "{opt_style}_{opt_payoff}_N_{min_value}_to_{max_value}_M_{M}_deg_{degree}.csv"
+    nofig: False
+
+  plot_and_show_table_by_samples:
+    xlabel: "Number of Samples (samples)"
+    ylabel: "Option Price"
+    title: "Option Price vs. Samples (samples)"
+    plot_name_template: "{opt_style}_{opt_payoff}_samples_{min_value}_to_{max_value}_N_{N}_M_{M}_deg_{degree}.png"
+    table_name_template: "{opt_style}_{opt_payoff}_samples_{min_value}_to_{max_value}_N_{N}_M_{M}_deg_{degree}.csv"
+    nofig: False
+
+  plot_and_show_table_by_degree:
+    xlabel: "Degree of Laguerre Polynomials (degree)"
+    ylabel: "Option Price"
+    title: "Option Price vs. Degree of Laguerre Polynomials (degree)"
+    plot_name_template: "{opt_style}_{opt_payoff}_degree_{min_value}_to_{max_value}_N_{N}_M_{M}.png"
+    table_name_template: "{opt_style}_{opt_payoff}_degree_{min_value}_to_{max_value}_N_{N}_M_{M}.csv"
+    nofig: False
+
+general_settings:
+  plot_directory: "./plots"
+  table_directory: "./tables"
+  show_legend: True
+  legend_location: "upper right"
+  grid: True
+  nofig: False
+
