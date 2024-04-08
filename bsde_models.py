@@ -42,7 +42,7 @@ class BSDEOptionPricingEuropean:
         self.dt = T / N
         self.samples = samples
         self.confidence_level = confidence_level
-        self.lamb = (mu - r)/(sigma) if mu is not None else 0
+        self.lamb = (mu - r)/(sigma) if mu is not None else 0 
         self.picard = picard
         self._opt_style = 'european'
 
@@ -128,16 +128,16 @@ class BSDEOptionPricingEuropean:
         prices, errors, rows = [], [], []
 
         for N_val in N_values:
-            self.N= N_val
+            self.N = N_val
             Y0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             prices.append(est_Y0)
             errors.append(std_Y0)
             rows.append([N_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1]])
-            print(f'Done with degree: {N_val}.')
+            print(f'Done with N: {N_val}.')
 
-        mean_price = np.mean(prices)
-        self._generate_plot(N_values, prices, errors, mean_price, bs_price, function_name, nofig)
+        self._generate_plot(N_values, prices, errors, function_name, bs_price, nofig)
+        self._generate_table(rows, function_name, prices)
 
     def plot_and_show_table_by_M(self, M_values, nofig=False, bs_price=None):
         function_name = inspect.currentframe().f_code.co_name
@@ -152,8 +152,8 @@ class BSDEOptionPricingEuropean:
             rows.append([M_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1]])
             print(f'Done with M_val: {M_val}.')
 
-        mean_price = np.mean(prices)
-        self._generate_plot(M_values, prices, errors, mean_price, bs_price, function_name, nofig)
+        self._generate_plot(M_values, prices, errors, function_name, bs_price, nofig)
+        self._generate_table(rows, function_name, prices)
 
     def plot_and_show_table_by_degree(self, degrees, nofig=False, bs_price=None):
         function_name = inspect.currentframe().f_code.co_name
@@ -168,8 +168,8 @@ class BSDEOptionPricingEuropean:
             rows.append([degree, est_Y0, std_Y0, CI_Y[0], CI_Y[1]])
             print(f'Done with degree: {degree}.')
 
-        mean_price = np.mean(prices)
-        self._generate_plot(degrees, prices, errors, mean_price, bs_price, function_name, nofig)
+        self._generate_plot(degrees, prices, errors, function_name, bs_price, nofig)
+        self._generate_table(rows, function_name, prices)
 
     def plot_and_show_table_by_samples(self, samples, nofig=False, bs_price=None):
         function_name = inspect.currentframe().f_code.co_name
@@ -187,27 +187,26 @@ class BSDEOptionPricingEuropean:
             rows.append([sample, est_Y0, std_Y0, CI_Y[0], CI_Y[1]])
             print(f'Done with sample: {sample}.')
 
-        mean_price = np.mean(prices)
-        self._generate_plot(samples, prices, errors, mean_price, bs_price, function_name, nofig)
-        self._generate_table(rows, function_name)
+        self._generate_plot(samples, prices, errors, function_name, bs_price, nofig)
+        self._generate_table(rows, function_name, prices)
 
-    def _generate_plot(self, x_values, y_values, y_errors, mean_price, bs_price, function_name, nofig):
+    def _generate_plot(self, x_values, y_values, y_errors, function_name, bs_price, nofig):
         plot_config = self._configs['plot_config'][function_name]
 
+        running_totals = np.cumsum(y_values)
+        running_average = running_totals / np.arange(1, len(y_values) + 1)
+
         plt.errorbar(x_values, y_values, yerr=y_errors, fmt='-o', capsize=5, capthick=2, ecolor='red', label='Option Price')
-        plt.plot(x_values, [mean_price] * len(x_values), 'g--', label='Mean Price')
+        plt.plot(x_values, running_average, 'b--', label='Running Average Price')
 
         if bs_price is not None:
             plt.plot(x_values, [bs_price] * len(x_values), 'k-', label='Black-Scholes Price')
             plt.scatter(x_values, [bs_price] * len(x_values), color='black', marker='_', s=100)
 
-        plt.scatter(x_values, [mean_price] * len(x_values), color='green', marker='x', s=100)
         plt.xlabel(plot_config.get('xlabel'))
         plt.ylabel(plot_config.get('ylabel'))
         plt.title(plot_config.get('title').format(opt_style=self._opt_style.capitalize(), option_payoff=self.option_payoff.capitalize()))
-        plt.legend()
-        if plot_config.get('show_legend', False):
-            plt.legend(loc=plot_config.get('legend_location', 'best'))
+        plt.legend(loc=plot_config.get('legend_location', 'best'))
         plt.grid(plot_config.get('grid', True))
 
         plot_directory = os.path.join(self._configs['general_settings']['plot_directory'], function_name)
@@ -229,23 +228,31 @@ class BSDEOptionPricingEuropean:
             plt.show()
         plt.close()
 
-    def _generate_table(self, rows, function_name):
+    def _generate_table(self, rows, function_name, prices):
         table_directory = os.path.join(self._configs['general_settings']['table_directory'], function_name)
         os.makedirs(table_directory, exist_ok=True)
-        
+
         first_elements = [row[0] for row in rows]
+
+        running_totals = np.cumsum(prices)
+        running_average = running_totals / np.arange(1, len(prices) + 1)
+
+        for i, row in enumerate(rows):
+            row.append(running_average[i])
+
         table_name = self._configs['plot_config'][function_name]['table_name_template'].format(
             opt_style=self.opt_style,
             opt_payoff=self.option_payoff,
             N=self.N,
             M=self.M,
             degree=self.degree,
-            min_value= min(first_elements),
-            max_value= max(first_elements)
+            min_value=min(first_elements),
+            max_value=max(first_elements)
         )
-        
+
         table_path = os.path.join(table_directory, table_name)
-        df = pd.DataFrame(rows, columns=['Degree', 'Estimated Price', 'Std. Deviation', 'CI Lower Bound', 'CI Upper Bound'])
+        
+        df = pd.DataFrame(rows, columns=[function_name.split('_')[-1], 'Estimated Price', 'Std. Deviation', 'CI Lower Bound', 'CI Upper Bound', 'Running Average Price'])
         df.to_csv(table_path, index=False)
         print(f"Table saved to {table_path}")
 
@@ -301,7 +308,7 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
 
     def _payoff_func(self, S):
         if self.option_payoff == "call":
-            return np.maximum(S - self.K, 0) - 2*np.maximum(S - self.K2, 0) 
+            return (np.maximum(S - self.K, 0) - 2*np.maximum(S - self.K2, 0))
         else:
             raise ValueError(f"Invalid option type: {self.option_payoff}. Supported types are 'call'.")
 
@@ -323,7 +330,8 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
                 E = X @ alpha_y
                 Z[:, i] = X @ alpha_z 
                 for _ in range(self.picard):
-                    Y[:, i-1] = E + (-self.r*Y[:, i] + self.lamb*Z[:, i] - (self.R - self.r)*np.min(Y[:, i] -Z[:, i]/self.sigma, 0))*self.dt
+                    Y[:, i-1] = E + (self.r*Y[:, i] + self.lamb*Z[:, i] - (self.R - self.r)*np.min(Y[:, i] -Z[:, i]/self.sigma, 0))*self.dt
+                    print(Y[:,i-1])
 
             Y0_samples[k] = np.mean(Y[:, 0])
 
@@ -339,7 +347,7 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropean):
 
     def _payoff_func(self, S):
         if self.option_payoff == "call":
-            return np.maximum(S - self.K, 0) - 2*np.maximum(S - self.K2, 0) 
+            return (np.maximum(S - self.K, 0) - 2*np.maximum(S - self.K2, 0))
         else:
             raise ValueError(f"Invalid option type: {self.option_payoff}. Supported types are 'call'.")
 
@@ -361,7 +369,8 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropean):
                 E = X @ alpha_y
                 Z[:, i] = X @ alpha_z 
                 for _ in range(self.picard):
-                    Y[:, i-1] = E + (-self.r*Y[:, i] + self.lamb*Z[:, i] - (self.R - self.r)*np.min(Y[:, i] -Z[:, i]/self.sigma, 0))*self.dt
+                    Y[:, i-1] = E + (self.r*Y[:, i] + self.lamb*Z[:, i] - (self.R - self.r)*np.min(Y[:, i] -Z[:, i]/self.sigma, 0))*self.dt
+
                 Y[:, i-1] = np.maximum(self._payoff_func(S[:, i]), Y[:, i-1])
             Y0_samples[k] = np.mean(Y[:, 0])
 

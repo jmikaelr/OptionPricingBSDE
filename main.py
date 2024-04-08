@@ -73,7 +73,8 @@ def main():
             option_pricing_obj.plot_and_show_table_by_samples(plot_values, args.nofig, price)
         else:  
             option_pricing_obj.run()  
-            print(f"{args.opt_style.capitalize()} {args.opt_payoff} option price: {price:.4f}")
+            if price:
+                print(f"{args.opt_style.capitalize()} {args.opt_payoff} option price: {price:.4f}")
     else:
         raise ValueError('Invalid option: {args.opt_style}')
 
