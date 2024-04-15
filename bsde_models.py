@@ -80,7 +80,7 @@ class BSDEOptionPricingEuropean:
         """ Generates Laguerre polynomials up to degree self.degree """
         if self.degree > 50 or self.degree < 1:
             raise ValueError(f"Invalid degree on Polynomial basis, you chose: {self.degree}, choose between 1 and 50")
-        S_expanded = np.expand_dims(S, axis=-1)   
+        S_expanded = np.expand_dims(S, axis=-1)
         basis_polynomials = np.array([np.polynomial.laguerre.Laguerre.basis(deg)(S_expanded) for deg in range(self.degree + 1)])
         Mk = np.transpose(basis_polynomials, (1, 2, 0)).reshape(S.shape[0], self.degree + 1)
         return Mk
@@ -88,31 +88,40 @@ class BSDEOptionPricingEuropean:
     def _generate_stock_paths(self):
         """Simulate Geometric Brownian Motion paths."""
         dt = self.T / self.N
-        dW = np.random.normal(0, np.sqrt(dt), (self.M, self.N + 1))
+        dW = np.random.normal(0, np.sqrt(dt), (self.M, self.N - 1))
         log_S = np.cumsum((self.mu - 0.5 * self.sigma**2) * dt + self.sigma * dW, axis=1)
         S = self.S0 * np.exp(np.hstack([np.zeros((self.M, 1)), log_S]))
         return S, dW
 
     def _bsde_solver(self):
-        """ Solves the BSDE equation for an european option using Cholesky Decomposition"""
+        """ Solves the BSDE equation for an european option using """
         Y0_samples = np.zeros(self.samples)
+        Z0_samples = np.zeros(self.samples)
 
         for k in range(self.samples):
-            S, _ = self._generate_stock_paths()
-            Y = np.zeros((self.M, self.N + 1))
+            S, dW = self._generate_stock_paths()
+            Y = np.zeros((self.M, self.N))
+            Z = np.zeros((self.M, self.N))
 
             Y[:, -1] = self._payoff_func(S[:, -1])
 
-            for i in range(self.N, 0, -1):
+            for i in range(self.N - 2, -1, -1):
                 X = self._generate_regression(S[:, i])
                 A = X.T @ X
-                alpha = np.linalg.lstsq(A, X.T @ Y[:, i], rcond=None)[0]
-                continuation_value = X @ alpha
-                Y[:, i-1] = continuation_value * np.exp(-self.r * self.dt)
+                Y_prev = Y[:, i+1]
+                b_z = X.T @ (Y_prev * dW[:, i])
+                b_y = X.T @ Y_prev
+                alpha_z = np.linalg.solve(A, b_z)
+                alpha_y = np.linalg.solve(A, b_y) 
+                Z[:, i] = (X @ alpha_z) / self.dt
+                for _ in range(self.picard):
+                    Y[:, i] = (X @ alpha_y) - (Z[: ,i]*self.lamb + self.r*Y_prev)*self.dt
+                    Y_prev = Y[:, i]
 
             Y0_samples[k] = np.mean(Y[:, 0])
+            Z0_samples[k] = np.mean(Z[:, 0])
 
-        return Y0_samples 
+        return Y0_samples, Z0_samples
 
     def _confidence_interval(self, sample):
         """ Calculates the confidence interval with confidence_level """ 
@@ -129,7 +138,7 @@ class BSDEOptionPricingEuropean:
 
         for N_val in N_values:
             self.N = N_val
-            Y0_array = self._bsde_solver()
+            Y0_array, _ = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             prices.append(est_Y0)
             errors.append(std_Y0)
@@ -145,7 +154,7 @@ class BSDEOptionPricingEuropean:
 
         for M_val in M_values:
             self.M = M_val
-            Y0_array = self._bsde_solver()
+            Y0_array, _ = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             prices.append(est_Y0)
             errors.append(std_Y0)
@@ -161,7 +170,7 @@ class BSDEOptionPricingEuropean:
 
         for degree in degrees:
             self.degree = degree
-            Y0_array = self._bsde_solver()
+            Y0_array, _ = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             prices.append(est_Y0)
             errors.append(std_Y0)
@@ -177,7 +186,7 @@ class BSDEOptionPricingEuropean:
 
         for sample in samples:
             self.samples = sample
-            Y0_array = self._bsde_solver()
+            Y0_array, _ = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             if sample == 1:
                 std_Y0 = 0
@@ -259,13 +268,17 @@ class BSDEOptionPricingEuropean:
     def run(self):
         """ Method called to run the program and solve the BSDE """
         start_timer = time.time()
-        Y0_array = self._bsde_solver()
+        Y0_array, Z0_array = self._bsde_solver()
         finished_time = time.time() - start_timer
         est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
-        print(f"\nBSDE solved in: {finished_time:.2f} seconds"
-                f"\nEstimated option price: {est_Y0:.4f}"
-                f"\nWith standard deviation: {std_Y0:.4f}"
-                f"\nConfidence interval: {CI_Y}"
+        est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
+        print(f"BSDE solved in: {finished_time:.2f} seconds\n"
+                f"\nEstimated option price (Y\u2080): {est_Y0:.4f}"
+                f"\nStandard Deviation: {std_Y0:.4f}"
+                f"\nConfidence Interval: {CI_Y}\n"
+                f"\nEstimated (Z\u2080): {est_Z0:.4f}"
+                f"\nStandard Deviation (Z\u2080): {std_Z0:.4f}"
+                f"\nConfidence Interval: {CI_Z}\n"
               )
 
 class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
@@ -276,27 +289,37 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
         self._opt_style = 'american'
 
     def _bsde_solver(self):
-        """ Solves the BSDE equation for an european option using Cholesky Decomposition"""
+        """ Solves the BSDE equation for an european option using """
         Y0_samples = np.zeros(self.samples)
+        Z0_samples = np.zeros(self.samples)
 
         for k in range(self.samples):
-            S, _ = self._generate_stock_paths()
-            Y = np.zeros((self.M, self.N + 1))
+            S, dW = self._generate_stock_paths()
+            Y = np.zeros((self.M, self.N))
+            Z = np.zeros((self.M, self.N))
 
-            Y[:, -1] = self._payoff_func(S[:, -1])
+            exercise_values = self._payoff_func(S)
+            Y[:, -1] = exercise_values[:, -1] 
 
-            for i in range(self.N, 0, -1):
+            for i in range(self.N - 2, -1, -1):
                 X = self._generate_regression(S[:, i])
                 A = X.T @ X
-                alpha = np.linalg.lstsq(A, X.T @ Y[:, i], rcond=None)[0]
-                continuation_value = X @ alpha
-                exercise_value = self._payoff_func(S[:, i])
-                Y[:, i-1] = np.maximum(continuation_value * np.exp(-self.r * self.dt), exercise_value)
-                
+                Y_prev = Y[:, i+1]
+                b_z = X.T @ (Y_prev * dW[:, i])
+                alpha_z = np.linalg.solve(A, b_z)
+                b_y = X.T @ Y_prev
+                alpha_y = np.linalg.solve(A, b_y) 
+                Z[:, i] = (X @ alpha_z) / self.dt
+                for _ in range(self.picard):
+                    Y[:, i] = (X @ alpha_y) - (Z[: ,i]*self.lamb + self.r*Y_prev)*self.dt
+                    Y_prev = Y[:, i]
+
+                Y[:, i] = np.maximum(Y[:, i], exercise_values[:, i])
 
             Y0_samples[k] = np.mean(Y[:, 0])
+            Z0_samples[k] = np.mean(Z[:, 0])
 
-        return Y0_samples
+        return Y0_samples, Z0_samples
 
 
 class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
@@ -314,28 +337,33 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
 
     def _bsde_solver(self):
         Y0_samples = np.zeros(self.samples)
+        Z0_samples = np.zeros(self.samples)
 
         for k in range(self.samples):
             S, dW = self._generate_stock_paths()
-            Y = np.zeros((self.M, self.N + 1))
-            Z = np.zeros((self.M, self.N + 1))
+            Y = np.zeros((self.M, self.N))
+            Z = np.zeros((self.M, self.N))
 
             Y[:, -1] = self._payoff_func(S[:, -1])
 
-            for i in range(self.N, 0, -1):
+            for i in range(self.N - 2, -1, -1):
                 X = self._generate_regression(S[:, i])
                 A = X.T @ X
-                alpha_y = np.linalg.lstsq(A, X.T @ Y[:, i], rcond=None)[0]
-                alpha_z = np.linalg.lstsq(A, X.T @ (Y[:, i] * dW[:, i]), rcond=None)[0]
-                E = X @ alpha_y
-                Z[:, i] = X @ alpha_z 
+                Y_prev = Y[:, i+1]
+                b_z = X.T @ (Y_prev * dW[:, i])
+                alpha_z = np.linalg.solve(A, b_z)
+                b_y = X.T @ Y_prev
+                alpha_y = np.linalg.solve(A, b_y) 
+                Z[:, i] = (X @ alpha_z) / self.dt
                 for _ in range(self.picard):
-                    Y[:, i-1] = E + (self.r*Y[:, i] + self.lamb*Z[:, i] - (self.R - self.r)*np.min(Y[:, i] -Z[:, i]/self.sigma, 0))*self.dt
-                    print(Y[:,i-1])
+                    Y[:, i] = ((X @ alpha_y) - (Y_prev*self.r + Z[:, i]*self.lamb - 
+                        (Y_prev - (Z[:, i]/self.sigma))*np.minimum(self.R-self.r,0))*self.dt)
+                    Y_prev = Y[:, i]
 
             Y0_samples[k] = np.mean(Y[:, 0])
+            Z0_samples[k] = np.mean(Z[:, 0])
 
-        return Y0_samples
+        return Y0_samples, Z0_samples
 
 
 class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropean):
@@ -353,27 +381,35 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropean):
 
     def _bsde_solver(self):
         Y0_samples = np.zeros(self.samples)
+        Z0_samples = np.zeros(self.samples)
 
         for k in range(self.samples):
             S, dW = self._generate_stock_paths()
-            Y = np.zeros((self.M, self.N + 1))
-            Z = np.zeros((self.M, self.N + 1))
+            Y = np.zeros((self.M, self.N))
+            Z = np.zeros((self.M, self.N))
 
-            Y[:, -1] = self._payoff_func(S[:, -1])
+            exercise_values = self._payoff_func(S)
+            Y[:, self.N - 1] = exercise_values[:, self.N - 1]
 
-            for i in range(self.N, 0, -1):
+            for i in range(self.N - 2, -1, -1):
                 X = self._generate_regression(S[:, i])
                 A = X.T @ X
-                alpha_y = np.linalg.lstsq(A, X.T @ Y[:, i], rcond=None)[0]
-                alpha_z = np.linalg.lstsq(A, X.T @ (Y[:, i] * dW[:, i]), rcond=None)[0]
-                E = X @ alpha_y
-                Z[:, i] = X @ alpha_z 
+                Y_prev = Y[:, i+1]
+                b_z = X.T @ (Y_prev * dW[:, i])
+                alpha_z = np.linalg.solve(A, b_z)
+                b_y = X.T @ Y_prev
+                alpha_y = np.linalg.solve(A, b_y) 
+                Z[:, i] = (X @ alpha_z) / self.dt
                 for _ in range(self.picard):
-                    Y[:, i-1] = E + (self.r*Y[:, i] + self.lamb*Z[:, i] - (self.R - self.r)*np.min(Y[:, i] -Z[:, i]/self.sigma, 0))*self.dt
+                    Y[:, i] = ((X @ alpha_y) - (Y_prev*self.r + Z[:, i]*self.lamb - 
+                        (Y_prev - (Z[:, i]/self.sigma))*np.minimum(self.R-self.r,0))*self.dt)
+                    Y_prev = Y[:, i]
 
-                Y[:, i-1] = np.maximum(self._payoff_func(S[:, i]), Y[:, i-1])
+                Y[:, i] = np.maximum(Y[:, i], exercise_values[:, i])
+
             Y0_samples[k] = np.mean(Y[:, 0])
+            Z0_samples[k] = np.mean(Z[:, 0])
 
-        return Y0_samples
+        return Y0_samples, Z0_samples
 
 

@@ -1,9 +1,11 @@
 from bsde_models import *
+import platform
 import numpy as np
 from scipy.stats import norm
 import argparse
 
 def main():
+    clear_screen()
     parser = argparse.ArgumentParser(description="Option Pricing using BSDE") 
     
     parser.add_argument("--S", type=float, default=100.0, help="Stock price")
@@ -91,6 +93,13 @@ def black_scholes(S, K, T, r, sigma, opt_payoff):
         return K*np.exp(-r*T)*N(-d2) - S * N(-d1)
     else:
         raise ValueError(f'Invalid payoff {opt_payoff}, it must be either "call" or "put"')
+
+def clear_screen():
+    if platform.system() == "Windows":
+        os.system('cls')  # For Windows
+    else:
+        os.system('clear')  # For Linux/macOS
+
 
 if __name__ == '__main__':
     main()
