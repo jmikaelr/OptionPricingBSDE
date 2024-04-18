@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 class BSDEOptionPricingEuropean:
     def __init__(self, S0, K, r, sigma, T, N, M, confidence_level = 0.025, samples = 100,
-                 option_payoff="call", degree = 3, mu = 0.05, picard = 3):
+                 mu = 0.05, option_payoff="call", degree_y = 3, degree_z = 2, picard = 3):
         if not isinstance(S0, (int, float)) or S0 <= 0:
             raise ValueError('S0 must be positive.')
         if not isinstance(K, (int, float)) or K <= 0:
@@ -24,7 +24,9 @@ class BSDEOptionPricingEuropean:
             raise ValueError('N must be a positive integer or float.')
         if not isinstance(M, int) or M <= 0:
             raise ValueError('M must be a positive integer.')
-        if not isinstance(degree, int) or degree < 0:
+        if not isinstance(degree_y, int) or degree_y < 0:
+            raise ValueError('degree must be a non-negative integer.')
+        if not isinstance(degree_z, int) or degree_z < 0:
             raise ValueError('degree must be a non-negative integer.')
         if not isinstance(confidence_level, float):
             raise ValueError('Lower confidence number msut be a float!')
@@ -38,7 +40,8 @@ class BSDEOptionPricingEuropean:
         self.N = N
         self.M = M
         self.option_payoff = self._get_opt_payoff(option_payoff)
-        self.degree = degree
+        self.degree_y = degree_y
+        self.degree_z = degree_z
         self.dt = T / N
         self.samples = samples
         self.confidence_level = confidence_level
@@ -77,20 +80,24 @@ class BSDEOptionPricingEuropean:
             raise ValueError(f"Invalid option type: {self.option_payoff}. Supported types are 'call' and 'put'.")
 
     def _generate_regression(self, S):
-        """ Generates Laguerre polynomials up to degree self.degree """
-        if self.degree > 50 or self.degree < 1:
-            raise ValueError(f"Invalid degree on Polynomial basis, you chose: {self.degree}, choose between 1 and 50")
+        """ Generates Laguerre polynomials up to degree self.degree_y """
+        if self.degree_y > 50 or self.degree_y < 1:
+            raise ValueError(f"Invalid degree on Polynomial basis, you chose: {self.degree_y}, choose between 1 and 50")
         S_expanded = np.expand_dims(S, axis=-1)
-        basis_polynomials = np.array([np.polynomial.laguerre.Laguerre.basis(deg)(S_expanded) for deg in range(self.degree + 1)])
-        Mk = np.transpose(basis_polynomials, (1, 2, 0)).reshape(S.shape[0], self.degree + 1)
-        return Mk
+        basis_polynomials_y = np.array([np.polynomial.laguerre.Laguerre.basis(deg)(S_expanded) for deg in range(self.degree_y + 1)])
+        basis_polynomials_z = np.array([np.polynomial.laguerre.Laguerre.basis(deg)(S_expanded) for deg in range(self.degree_z + 1)])
+        p_y = np.transpose(basis_polynomials_y, (1, 2, 0)).reshape(S.shape[0], self.degree_y + 1)
+        p_z = np.transpose(basis_polynomials_z, (1, 2, 0)).reshape(S.shape[0], self.degree_z + 1)
+        return p_y, p_z
 
     def _generate_stock_paths(self):
-        """Simulate Geometric Brownian Motion paths."""
+        """Simulate Geometric Brownian Motion """ 
         dt = self.T / self.N
         dW = np.random.normal(0, np.sqrt(dt), (self.M, self.N - 1))
-        log_S = np.cumsum((self.mu - 0.5 * self.sigma**2) * dt + self.sigma * dW, axis=1)
-        S = self.S0 * np.exp(np.hstack([np.zeros((self.M, 1)), log_S]))
+        S = np.empty((self.M, self.N))
+        S[:, 0] = self.S0  
+        log_S = np.cumsum((self.mu - 0.5 * self.sigma**2) * dt + self.sigma * dW, axis=1, out=S[:, 1:])
+        S[:, 1:] = self.S0 * np.exp(log_S)
         return S, dW
 
     def _bsde_solver(self):
@@ -106,17 +113,19 @@ class BSDEOptionPricingEuropean:
             Y[:, -1] = self._payoff_func(S[:, -1])
 
             for i in range(self.N - 2, -1, -1):
-                X = self._generate_regression(S[:, i])
-                A = X.T @ X
+                X_y, X_z = self._generate_regression(S[:, i])
+                A_z = X_z.T @ X_z
+                A_y = X_y.T @ X_y
                 Y_prev = Y[:, i+1]
-                b_z = X.T @ (Y_prev * dW[:, i])
-                b_y = X.T @ Y_prev
-                alpha_z = np.linalg.solve(A, b_z)
-                alpha_y = np.linalg.solve(A, b_y) 
-                Z[:, i] = (X @ alpha_z) / self.dt
+                b_z = X_z.T @ (Y_prev * dW[:, i])
+                b_y = X_y.T @ Y_prev
+                alpha_z, _, _, _ = np.linalg.lstsq(A_z, b_z, rcond=None)
+                alpha_y, _, _, _ = np.linalg.lstsq(A_y, b_y, rcond=None)
+                Z[:, i] = (X_z @ alpha_z) / self.dt
+                Y[:, i] = X_y @ alpha_y 
+                Z_lamb = Z[: ,i]*self.lamb 
                 for _ in range(self.picard):
-                    Y[:, i] = (X @ alpha_y) - (Z[: ,i]*self.lamb + self.r*Y_prev)*self.dt
-                    Y_prev = Y[:, i]
+                    Y[:, i] = Y_prev - (Z_lamb + self.r*Y[:, i])*self.dt
 
             Y0_samples[k] = np.mean(Y[:, 0])
             Z0_samples[k] = np.mean(Z[:, 0])
@@ -169,7 +178,7 @@ class BSDEOptionPricingEuropean:
         prices, errors, rows = [], [], []
 
         for degree in degrees:
-            self.degree = degree
+            self.degree_y = degree
             Y0_array, _ = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             prices.append(est_Y0)
@@ -226,7 +235,7 @@ class BSDEOptionPricingEuropean:
             opt_payoff=self.option_payoff,
             N=self.N,
             M=self.M,
-            degree=self.degree,
+            degree=self.degree_y,
             min_value=min(x_values),
             max_value=max(x_values)
         )
@@ -254,7 +263,7 @@ class BSDEOptionPricingEuropean:
             opt_payoff=self.option_payoff,
             N=self.N,
             M=self.M,
-            degree=self.degree,
+            degree=self.degree_y,
             min_value=min(first_elements),
             max_value=max(first_elements)
         )
@@ -281,11 +290,28 @@ class BSDEOptionPricingEuropean:
                 f"\nConfidence Interval: {CI_Z}\n"
               )
 
+    def __repr__(self):
+        return (f"{self.__class__.__name__}(\n"
+                f"  S0={self.S0},\n"
+                f"  K={self.K},\n"
+                f"  r={self.r},\n"
+                f"  sigma={self.sigma},\n"
+                f"  T={self.T},\n"
+                f"  N={self.N},\n"
+                f"  M={self.M},\n"
+                f"  confidence_level={self.confidence_level},\n"
+                f"  samples={self.samples},\n"
+                f"  mu={self.mu},\n"
+                f"  option_payoff='{self.option_payoff}',\n"
+                f"  degree_y={self.degree_y},\n"
+                f"  degree_z={self.degree_z},\n"
+                f"  picard={self.picard}\n)")
+
 class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
     def __init__(self, S0, K, r, sigma, T, N, M, confidence_level=0.025, samples=100, 
-                 option_payoff="call", degree=3, mu=0.05, picard=3):
-        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, 
-                         option_payoff, degree, mu, picard)
+                mu=0.05, option_payoff="call", degree_y=3, degree_z=3, picard=3):
+        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, mu, 
+                         option_payoff, degree_y, degree_z, picard)
         self._opt_style = 'american'
 
     def _bsde_solver(self):
@@ -302,17 +328,19 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
             Y[:, -1] = exercise_values[:, -1] 
 
             for i in range(self.N - 2, -1, -1):
-                X = self._generate_regression(S[:, i])
-                A = X.T @ X
+                X_y, X_z = self._generate_regression(S[:, i])
+                A_z = X_z.T @ X_z
+                A_y = X_y.T @ X_y
                 Y_prev = Y[:, i+1]
-                b_z = X.T @ (Y_prev * dW[:, i])
-                alpha_z = np.linalg.solve(A, b_z)
-                b_y = X.T @ Y_prev
-                alpha_y = np.linalg.solve(A, b_y) 
-                Z[:, i] = (X @ alpha_z) / self.dt
+                b_z = X_z.T @ (Y_prev * dW[:, i])
+                b_y = X_y.T @ Y_prev
+                alpha_z, _, _, _ = np.linalg.lstsq(A_z, b_z, rcond=None)
+                alpha_y, _, _, _ = np.linalg.lstsq(A_y, b_y, rcond=None)
+                Z[:, i] = (X_z @ alpha_z) / self.dt
+                Y[:, i] = X_y @ alpha_y 
+                Z_lamb = Z[: ,i]*self.lamb 
                 for _ in range(self.picard):
-                    Y[:, i] = (X @ alpha_y) - (Z[: ,i]*self.lamb + self.r*Y_prev)*self.dt
-                    Y_prev = Y[:, i]
+                    Y[:, i] = Y_prev - (Z_lamb + self.r*Y[:, i])*self.dt
 
                 Y[:, i] = np.maximum(Y[:, i], exercise_values[:, i])
 
@@ -321,10 +349,15 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
 
         return Y0_samples, Z0_samples
 
+    def __repr__(self):
+        base_repr = super().__repr__()
+
+        return base_repr[:-1] + f" opt_style='{self._opt_style}'\n)"
+
 
 class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
-    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, option_payoff, degree, mu, K2, R):
-        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, option_payoff, degree, mu)
+    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, degree_y, degree_z, picard, K2, R):
+        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, degree_y, degree_z, picard)
         self.K2 = 105 if K2 is None else K2 
         self.R = 0.06 if R is None else R 
         self._opt_style = 'europeanspread'
@@ -347,28 +380,36 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
             Y[:, -1] = self._payoff_func(S[:, -1])
 
             for i in range(self.N - 2, -1, -1):
-                X = self._generate_regression(S[:, i])
-                A = X.T @ X
+                X_y, X_z = self._generate_regression(S[:, i])
+                A_z = X_z.T @ X_z
+                A_y = X_y.T @ X_y
                 Y_prev = Y[:, i+1]
-                b_z = X.T @ (Y_prev * dW[:, i])
-                alpha_z = np.linalg.solve(A, b_z)
-                b_y = X.T @ Y_prev
-                alpha_y = np.linalg.solve(A, b_y) 
-                Z[:, i] = (X @ alpha_z) / self.dt
+                b_z = X_z.T @ (Y_prev * dW[:, i])
+                b_y = X_y.T @ Y_prev
+                alpha_z, _, _, _ = np.linalg.lstsq(A_z, b_z, rcond=None)
+                alpha_y, _, _, _ = np.linalg.lstsq(A_y, b_y, rcond=None)
+                Z[:, i] = (X_z @ alpha_z) / self.dt
+                Y[:, i] = X_y @ alpha_y 
+                Z_lamb = Z[: ,i]*self.lamb 
                 for _ in range(self.picard):
-                    Y[:, i] = ((X @ alpha_y) - (Y_prev*self.r + Z[:, i]*self.lamb - 
-                        (Y_prev - (Z[:, i]/self.sigma))*np.minimum(self.R-self.r,0))*self.dt)
-                    Y_prev = Y[:, i]
+                    Y[:, i] = (Y_prev - (Y[:, i]*self.r + Z_lamb - 
+                        (self.R-self.r)*np.minimum((Y[:, i] - (Z[:, i]/self.sigma)), 0)) * self.dt)
 
             Y0_samples[k] = np.mean(Y[:, 0])
             Z0_samples[k] = np.mean(Z[:, 0])
 
         return Y0_samples, Z0_samples
 
+    def __repr__(self):
+        base_repr = super().__repr__()
+        return base_repr[:-1] + f"  opt_style='{self._opt_style}'\n  K2='{self.K2}'\n  R='{self.R}'\n)"
+
 
 class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropean):
-    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, option_payoff, degree, mu, K2, R):
-        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, option_payoff, degree, mu)
+    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, degree_y, degree_z, picard, K2, R):
+        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, degree_y, degree_z, picard)
+        self.K2 = 105 if K2 is None else K2 
+        self.R = 0.06 if R is None else R 
         self.K2 = 105 if K2 is None else K2 
         self.R = 0.06 if R is None else R 
         self._opt_style = 'americanspread'
@@ -392,18 +433,20 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropean):
             Y[:, self.N - 1] = exercise_values[:, self.N - 1]
 
             for i in range(self.N - 2, -1, -1):
-                X = self._generate_regression(S[:, i])
-                A = X.T @ X
+                X_y, X_z = self._generate_regression(S[:, i])
+                A_z = X_z.T @ X_z
+                A_y = X_y.T @ X_y
                 Y_prev = Y[:, i+1]
-                b_z = X.T @ (Y_prev * dW[:, i])
-                alpha_z = np.linalg.solve(A, b_z)
-                b_y = X.T @ Y_prev
-                alpha_y = np.linalg.solve(A, b_y) 
-                Z[:, i] = (X @ alpha_z) / self.dt
+                b_z = X_z.T @ (Y_prev * dW[:, i])
+                b_y = X_y.T @ Y_prev
+                alpha_z, _, _, _ = np.linalg.lstsq(A_z, b_z, rcond=None)
+                alpha_y, _, _, _ = np.linalg.lstsq(A_y, b_y, rcond=None)
+                Z[:, i] = (X_z @ alpha_z) / self.dt
+                Y[:, i] = X_y @ alpha_y 
+                Z_lamb = Z[: ,i]*self.lamb 
                 for _ in range(self.picard):
-                    Y[:, i] = ((X @ alpha_y) - (Y_prev*self.r + Z[:, i]*self.lamb - 
-                        (Y_prev - (Z[:, i]/self.sigma))*np.minimum(self.R-self.r,0))*self.dt)
-                    Y_prev = Y[:, i]
+                    Y[:, i] = (Y_prev - (Y[:, i]*self.r + Z_lamb - 
+                        (self.R-self.r)*np.minimum((Y[:, i] - (Z[:, i]/self.sigma)), 0)) * self.dt)
 
                 Y[:, i] = np.maximum(Y[:, i], exercise_values[:, i])
 
@@ -412,4 +455,6 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropean):
 
         return Y0_samples, Z0_samples
 
-
+    def __repr__(self):
+        base_repr = super().__repr__()
+        return base_repr[:-1] + f"  opt_style='{self._opt_style}'\n  K2='{self.K2}'\n  R='{self.R}'\n)"

@@ -1,5 +1,4 @@
 from bsde_models import *
-import platform
 import numpy as np
 from scipy.stats import norm
 import argparse
@@ -18,7 +17,9 @@ def main():
     parser.add_argument("--N", type=int, default=252, help="Number of time steps")
     parser.add_argument("--M", type=int, default=100000, help="Number of Monte Carlo simulations")
     parser.add_argument("--L", type=float, default=0.025, help="confidence alpha")
-    parser.add_argument("--degree", type=int, default=3, help="Degree for regression")
+    parser.add_argument("--ydeg", type=int, default=3, help="Order of degrees for regression simulating Y")
+    parser.add_argument("--zdeg", type=int, default=3, help="Order of degrees for regression simulating Z")
+    parser.add_argument("--picard", type=int, default=3, help="Amount of picard iterationos")
     parser.add_argument("--samples", type=int, default=10, help="Number of samples of solved BSDEs prices")
     parser.add_argument("--opt_payoff", type=str, choices=['call', 'put'], default='call', help="Option payoff (either 'call' or 'put')")
     parser.add_argument("--opt_style", type=str, choices=['european', 'american', 'europeanspread', 'americanspread'], default='european', help="Option style")
@@ -34,24 +35,24 @@ def main():
         if args.opt_style == 'european':
             option_pricing_obj = BSDEOptionPricingEuropean(args.S, args.K, args.r, args.sigma,
                                                            args.T, args.N, args.M, args.L,
-                                                           args.samples, args.opt_payoff,
-                                                           args.degree, args.mu)
+                                                           args.samples, args.mu, args.opt_payoff,
+                                                           args.ydeg, args.zdeg, args.picard)
             price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
         elif args.opt_style == 'american':
             option_pricing_obj = BSDEOptionPricingAmerican(args.S, args.K, args.r, args.sigma,
                                                            args.T, args.N, args.M, args.L,
-                                                           args.samples, args.opt_payoff,
-                                                           args.degree)
+                                                           args.samples, args.mu, args.opt_payoff,
+                                                           args.ydeg, args.zdeg, args.picard)
         elif args.opt_style == 'europeanspread':
             option_pricing_obj = BSDEOptionPricingEuropeanSpread(args.S, args.K, args.r, args.sigma,
                                                                  args.T, args.N, args.M, args.L,
-                                                                 args.samples, args.opt_payoff,
-                                                                 args.degree, args.mu, args.K2, args.R)
+                                                                 args.samples, args.mu, args.opt_payoff,
+                                                                 args.ydeg, args.zdeg, args.picard, args.K2, args.R)
         elif args.opt_style == 'americanspread':
             option_pricing_obj = BSDEOptionPricingAmericanSpread(args.S, args.K, args.r, args.sigma,
                                                                  args.T, args.N, args.M, args.L,
-                                                                 args.samples, args.opt_payoff,
-                                                                 args.degree, args.mu, args.K2, args.R)
+                                                                 args.samples, args.mu, args.opt_payoff,
+                                                                 args.ydeg, args.zdeg, args.picard, args.K2, args.R)
         if args.plot_type == "N": 
             if not plot_values:
                 raise ValueError('No values given in --plot_values!')
