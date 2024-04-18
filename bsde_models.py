@@ -7,9 +7,11 @@ import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
 
+np.random.seed(0)
+
 class BSDEOptionPricingEuropean:
     def __init__(self, S0, K, r, sigma, T, N, M, confidence_level = 0.025, samples = 100,
-                 mu = 0.05, option_payoff="call", degree_y = 3, degree_z = 2, picard = 3):
+                 mu = 0.05, option_payoff="call", degree_y = 4, degree_z = 2, picard = 3):
         if not isinstance(S0, (int, float)) or S0 <= 0:
             raise ValueError('S0 must be positive.')
         if not isinstance(K, (int, float)) or K <= 0:
@@ -93,8 +95,8 @@ class BSDEOptionPricingEuropean:
     def _generate_stock_paths(self):
         """Simulate Geometric Brownian Motion """ 
         dt = self.T / self.N
-        dW = np.random.normal(0, np.sqrt(dt), (self.M, self.N - 1))
-        S = np.empty((self.M, self.N))
+        dW = np.random.normal(0, np.sqrt(dt), (self.M, self.N))
+        S = np.empty((self.M, self.N+1))
         S[:, 0] = self.S0  
         log_S = np.cumsum((self.mu - 0.5 * self.sigma**2) * dt + self.sigma * dW, axis=1, out=S[:, 1:])
         S[:, 1:] = self.S0 * np.exp(log_S)
@@ -339,8 +341,8 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
                 Z[:, i] = (X_z @ alpha_z) / self.dt
                 Y[:, i] = X_y @ alpha_y 
                 Z_lamb = Z[: ,i]*self.lamb 
-                for _ in range(self.picard):
-                    Y[:, i] = Y_prev - (Z_lamb + self.r*Y[:, i])*self.dt
+                #for _ in range(self.picard):
+                    #Y[:, i] = Y_prev - (Z_lamb + self.r*Y[:, i])*self.dt
 
                 Y[:, i] = np.maximum(Y[:, i], exercise_values[:, i])
 
@@ -376,27 +378,47 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
             S, dW = self._generate_stock_paths()
             Y = np.zeros((self.M, self.N))
             Z = np.zeros((self.M, self.N))
+            E = np.zeros((self.M, self.N))
 
             Y[:, -1] = self._payoff_func(S[:, -1])
 
+#            for i in range(self.N - 1, -1, -1):
+#                X_y, X_z = self._generate_regression(S[:, i])
+#                L_z = np.linalg.cholesky(X_z.T @ X_z)
+#                L_y = np.linalg.cholesky(X_y.T @ X_y)
+#                z_z = np.linalg.solve(L_z, X_z.T @ (Y[:, i] * dW[:, i]))
+#                z_y = np.linalg.solve(L_y, X_y.T @ Y[:, i])
+#                alpha_z = np.linalg.lstsq(L_z.T, z_z, rcond=None)[0]
+#                alpha_y = np.linalg.lstsq(L_y.T, z_y, rcond=None)[0]
+#                print(alpha_y)
+#                Z[:, i] = (X_z @ alpha_z) / self.dt 
+#                E[:, i] = X_y @ alpha_y
+#                if i == self.N - 2:
+#                    return
+#                for _ in range(self.picard):
+#                    Y[:, i] = E[:, i] + (-self.r*Y[:, i] - Z[:, i] * self.lamb + (self.R-self.r)*np.minimum(Y[:, i] - Z[:, i], 0)) * self.dt
             for i in range(self.N - 2, -1, -1):
                 X_y, X_z = self._generate_regression(S[:, i])
+
                 A_z = X_z.T @ X_z
                 A_y = X_y.T @ X_y
-                Y_prev = Y[:, i+1]
-                b_z = X_z.T @ (Y_prev * dW[:, i])
-                b_y = X_y.T @ Y_prev
+                
+                b_z = X_z.T @ (Y[:, i+1] * dW[:, i])
+                b_y = X_y.T @ Y[:, i+1]
+
+                # Directly compute the regression coefficients using least squares
                 alpha_z, _, _, _ = np.linalg.lstsq(A_z, b_z, rcond=None)
                 alpha_y, _, _, _ = np.linalg.lstsq(A_y, b_y, rcond=None)
-                Z[:, i] = (X_z @ alpha_z) / self.dt
-                Y[:, i] = X_y @ alpha_y 
-                Z_lamb = Z[: ,i]*self.lamb 
-                for _ in range(self.picard):
-                    Y[:, i] = (Y_prev - (Y[:, i]*self.r + Z_lamb - 
-                        (self.R-self.r)*np.minimum((Y[:, i] - (Z[:, i]/self.sigma)), 0)) * self.dt)
 
+                Z[:, i] = (X_z @ alpha_z) / self.dt
+                E[:, i] = X_y @ alpha_y
+                #print("E[:, i]:", E[:, i])
+                for _ in range(self.picard):
+                    Y[:, i] = E[:, i] + (-self.r*Y[:, i] - Z[:, i] * self.lamb + (self.R-self.r)*np.minimum(Y[:, i] - Z[:, i]/self.sigma, 0)) * self.dt
+
+                
             Y0_samples[k] = np.mean(Y[:, 0])
-            Z0_samples[k] = np.mean(Z[:, 0])
+            Z0_samples[k] = np.mean(Z[:, 0])               
 
         return Y0_samples, Z0_samples
 
