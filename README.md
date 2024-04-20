@@ -2,6 +2,15 @@
 
 This module offers implementations for pricing options using the Backward Stochastic Differential Equation (BSDE) method. It supports both European and American options, along with variants for European and American spread options featuring complex payoff functions.
 
+This module attempts to numerically find the pair (Y,Z) that solves the following BSDE 
+$$
+-dY_t = f(t, Y_t, Z_t)dt  - Z_t^*dW_t; \quad Y_T = \xi,
+$$
+where $\xi$ in this case represents the options payoff at maturity.
+\\
+For American options, allowing early exercise for any $t\in [0,T]$, $\xi$ is added as a condition at each discritised step instead. The underlying process $X_t$ is the Geometric Brownian Motion under the Black-Scholes condition used to simulate the stock price paths. 
+
+
 ## Features
 
 - **European Options**: Implements pricing for vanilla European options with standard payoff functions:
@@ -27,7 +36,7 @@ This module offers implementations for pricing options using the Backward Stocha
 
 1. Clone the repository:
     ```bash
-    git clone <repository-url>
+    git clone https://github.com/Xehiss/OptionPricingBSDE.git
     ``` 
 2. Navigate to the project directory:
     ```bash
@@ -57,25 +66,25 @@ python3 main.py
 ```
 
 ## Command Line Arguments
---S <float>: Initial stock price (default: 100.0).
---K <float>: Strike price of the option (default: 95.0).
---K2 <float>: Second strike price for spread options (only needed for spread options).
---r <float>: Risk-free interest rate (default: 0.01).
---R <float>: Second interest rate for spread options (only needed for spread options).
---mu <float>: Drift term of the stock's returns (default is similar to r if not specified).
---sigma <float>: Volatility of the stock (default: 0.2).
---T <float>: Time to expiration in years (default: 0.25).
---N <int>: Number of time steps for discretization (default: 20).
---M <int>: Number of Monte Carlo simulations (default: 1000).
---L <float>: Confidence level alpha (default: 0.025).
---delta <float>: Size of hypercubes (default: 1).
---domain <list>: Domain covered by the hypercubes (default: [40, 180]).
---samples <int>: Number of BSDE sample paths (default: 50).
---opt_payoff <choice>: Option payoff type, choices are 'call' or 'put' (default: 'call').
---opt_style <choice>: Option style, choices are 'european', 'american', 'europeanspread', 'americanspread' (default: 'european').
---nofig: If set, no plot will be shown (plots are shown by default unless this is specified).
---plot_type <choice>: Type of plot based on parameter variation, choices are 'N', 'M', 'deltas', 'samples'.
---plot_values: Comma-separated values for the selected plot type (e.g., 10,20,30).
+-** S <float>: Initial stock price (default: 100.0).
+-** K <float>: Strike price of the option (default: 95.0).
+-** K2 <float>: Second strike price for spread options (only needed for spread options).
+-** r <float>: Risk-free interest rate (default: 0.01).
+-** R <float>: Second interest rate for spread options (only needed for spread options).
+-** mu <float>: Drift term of the stock's returns (default is similar to r if not specified).
+-** sigma <float>: Volatility of the stock (default: 0.2).
+-** T <float>: Time to expiration in years (default: 0.25).
+-** N <int>: Number of time steps for discretization (default: 20).
+-** M <int>: Number of Monte Carlo simulations (default: 1000).
+-** L <float>: Confidence level alpha (default: 0.025).
+-** delta <float>: Size of hypercubes (default: 1).
+-** domain <list>: Domain covered by the hypercubes (default: [40, 180]).
+-** samples <int>: Number of BSDE sample paths (default: 50).
+-** opt_payoff <choice>: Option payoff type, choices are 'call' or 'put' (default: 'call').
+-** opt_style <choice>: Option style, choices are 'european', 'american', 'europeanspread', 'americanspread' (default: 'european').
+-** nofig: If set, no plot will be shown (plots are shown by default unless this is specified).
+-** plot_type <choice>: Type of plot based on parameter variation, choices are 'N', 'M', 'deltas', 'samples'.
+-** plot_values: Comma-separated values for the selected plot type (e.g., 10,20,30).
 
 # Example Command
 ```bash
