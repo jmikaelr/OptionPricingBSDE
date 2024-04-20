@@ -3,10 +3,8 @@
 This module offers implementations for pricing options using the Backward Stochastic Differential Equation (BSDE) method. It supports both European and American options, along with variants for European and American spread options featuring complex payoff functions.
 
 This module attempts to numerically find the pair (Y,Z) that solves the following BSDE 
-**The BSDE**
-$$
--dY_t = f(t, Y_t, Z_t)dt  - Z_t^*dW_t; \quad Y_T = \xi,
-$$
+**The BSDE**  
+$$-dY_t = f(t, Y_t, Z_t)dt  - Z_t^*dW_t; \quad Y_T = \xi$$  
 where $\xi$ in this case represents the options payoff at maturity. For American options, allowing early exercise for any $t\in [0,T]$, $\xi$ is added as a condition at each discritised step instead. The underlying process $X_t$ is the Geometric Brownian Motion under the Black-Scholes condition used to simulate the stock price paths. 
 
 
