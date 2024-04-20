@@ -30,7 +30,7 @@ class BSDEOptionPricingEuropean:
         picard (int): Number of Picard iterations for updating Y.
     """
     def __init__(self, S0, K, r, sigma, T, N, M,  confidence_level = 0.025, 
-                 samples = 50, mu = 0, option_payoff="call", domain=None, delta= None):
+                 samples = 50, mu = None, option_payoff="call", domain=None, delta= None):
         if not isinstance(S0, (int, float)) or S0 <= 0:
             raise ValueError('S0 must be positive.')
         if not isinstance(K, (int, float)) or K <= 0:
@@ -178,6 +178,7 @@ class BSDEOptionPricingEuropean:
 
         for N_val in N_values:
             self.N = N_val
+            self.dt = self.T / self.N
             Y0_array, Z0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
@@ -229,7 +230,7 @@ class BSDEOptionPricingEuropean:
             Y_errors.append(std_Y0)
             Z_errors.append(std_Z0)
             rows.append([delta, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, CI_Z[0], CI_Z[1]])
-            print(f'Done with degree: {delta}.')
+            print(f'Done with delta: {delta}.')
 
         self._generate_plot(deltas, Y, Y_errors, function_name, bs_price, nofig)
         self._generate_table(rows, function_name)
@@ -354,7 +355,7 @@ class BSDEOptionPricingEuropean:
                 f"  mu={self.mu},\n"
                 f"  option_payoff='{self.option_payoff}',\n"
                 f"  domain={self.domain},\n"
-                f"  delta={self.delta},\n"
+                f"  delta={self.delta},\n)"
         )
 
 

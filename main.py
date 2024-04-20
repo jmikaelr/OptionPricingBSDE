@@ -15,11 +15,11 @@ def main():
     parser.add_argument("--sigma", type=float, default=0.2, help="Volatility (sigma)")
     parser.add_argument("--T", type=float, default=0.25, help="Time to expiration (in years)")
     parser.add_argument("--N", type=int, default=20, help="Number of time steps")
-    parser.add_argument("--M", type=int, default=1000, help="Number of Monte Carlo simulations")
+    parser.add_argument("--M", type=int, default=5000, help="Number of Monte Carlo simulations")
     parser.add_argument("--L", type=float, default=0.025, help="confidence alpha")
     parser.add_argument("--delta", type=float, default=1, help="Length of hybercubes")
     parser.add_argument("--domain", type=list, default=[40,180], help="The domain which the hybercubes cover")
-    parser.add_argument("--samples", type=int, default=50, help="Number of samples of solved BSDEs prices")
+    parser.add_argument("--samples", type=int, default=10, help="Number of samples of solved BSDEs prices")
     parser.add_argument("--opt_payoff", type=str, choices=['call', 'put'], default='call', help="Option payoff (either 'call' or 'put')")
     parser.add_argument("--opt_style", type=str, choices=['european', 'american', 'europeanspread', 'americanspread'], default='european', help="Option style")
     parser.add_argument("--nofig", action='store_true', help="Do not show plot. It plots by default.") 
@@ -28,7 +28,7 @@ def main():
     parser.add_argument("--plot_values", type=str, help="Comma-separated list of values for the selected plot type (e.g., 10,20,30).")
     args = parser.parse_args()
 
-    plot_values = [int(x) for x in args.plot_values.split(',')] if args.plot_values else None
+    plot_values = [float(x) for x in args.plot_values.split(',')] if args.plot_values else None
     price = None
     if args.opt_style in ['european', 'americanspread', 'europeanspread', 'american']:
         if args.opt_style == 'european':
@@ -52,27 +52,28 @@ def main():
                                                                  args.T, args.N, args.M, args.L,
                                                                  args.samples, args.mu, args.opt_payoff,
                                                                  args.domain, args.delta, args.K2, args.R)
+        
+        if args.plot_type in ["N","M","deltas","samples"]:
+            if not plot_values:
+                raise ValueError('No plot values to plot.')
+            elif args.plot_type == "N": 
+                print(f"Plotting by varying N with values: {args.plot_values}")
+                option_pricing_obj.plot_and_show_table_by_N(plot_values, args.nofig, price)
+            elif args.plot_type == "M":
+                print(f"Plotting by varying M with values: {args.plot_values}")
+                option_pricing_obj.plot_and_show_table_by_M(plot_values, args.nofig, price)
+            elif args.plot_type == "deltas":
+                print(f"Plotting by varying degrees with values: {args.plot_values}")
+                option_pricing_obj.plot_and_show_table_by_deltas(plot_values, args.nofig, price)
+            elif args.plot_type == "samples":
+                print(f"Plotting by varying samples size with values: {args.plot_values}")
+                option_pricing_obj.plot_and_show_table_by_samples(plot_values, args.nofig, price)
+        else:  
+            option_pricing_obj.run()  
+            if price:
+                print(f"{args.opt_style.capitalize()} {args.opt_payoff} option price: {price:.4f}")
     else:
         raise ValueError('Invalid option: {args.opt_style}')
-    if args.plot_type in ["N","M","deltas","samples"]:
-        if not plot_values:
-            raise ValueError('No plot values to plot.')
-        elif args.plot_type == "N": 
-            print(f"Plotting by varying N with values: {args.plot_values}")
-            option_pricing_obj.plot_and_show_table_by_N(plot_values, args.nofig, price)
-        elif args.plot_type == "M":
-            print(f"Plotting by varying M with values: {args.plot_values}")
-            option_pricing_obj.plot_and_show_table_by_M(plot_values, args.nofig, price)
-        elif args.plot_type == "deltas":
-            print(f"Plotting by varying degrees with values: {args.plot_values}")
-            option_pricing_obj.plot_and_show_table_by_deltas(plot_values, args.nofig, price)
-        elif args.plot_type == "samples":
-            print(f"Plotting by varying samples size with values: {args.plot_values}")
-            option_pricing_obj.plot_and_show_table_by_samples(plot_values, args.nofig, price)
-    else:  
-        option_pricing_obj.run()  
-        if price:
-            print(f"{args.opt_style.capitalize()} {args.opt_payoff} option price: {price:.4f}")
 
    
 def black_scholes(S, K, T, r, sigma, opt_payoff):
