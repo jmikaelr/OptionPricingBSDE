@@ -14,18 +14,17 @@ def main():
     parser.add_argument("--mu", type=float, default=None, help="Drift term on stock")
     parser.add_argument("--sigma", type=float, default=0.2, help="Volatility (sigma)")
     parser.add_argument("--T", type=float, default=0.25, help="Time to expiration (in years)")
-    parser.add_argument("--N", type=int, default=252, help="Number of time steps")
-    parser.add_argument("--M", type=int, default=100000, help="Number of Monte Carlo simulations")
+    parser.add_argument("--N", type=int, default=20, help="Number of time steps")
+    parser.add_argument("--M", type=int, default=1000, help="Number of Monte Carlo simulations")
     parser.add_argument("--L", type=float, default=0.025, help="confidence alpha")
-    parser.add_argument("--ydeg", type=int, default=4, help="Order of degrees for regression simulating Y")
-    parser.add_argument("--zdeg", type=int, default=2, help="Order of degrees for regression simulating Z")
-    parser.add_argument("--picard", type=int, default=3, help="Amount of picard iterationos")
-    parser.add_argument("--samples", type=int, default=10, help="Number of samples of solved BSDEs prices")
+    parser.add_argument("--delta", type=float, default=1, help="Length of hybercubes")
+    parser.add_argument("--domain", type=list, default=[40,180], help="The domain which the hybercubes cover")
+    parser.add_argument("--samples", type=int, default=50, help="Number of samples of solved BSDEs prices")
     parser.add_argument("--opt_payoff", type=str, choices=['call', 'put'], default='call', help="Option payoff (either 'call' or 'put')")
     parser.add_argument("--opt_style", type=str, choices=['european', 'american', 'europeanspread', 'americanspread'], default='european', help="Option style")
     parser.add_argument("--nofig", action='store_true', help="Do not show plot. It plots by default.") 
 
-    parser.add_argument("--plot_type", type=str, choices = ['N', 'M', 'degrees', 'samples'], default = None, help="What kind of plot, default is no plot.")
+    parser.add_argument("--plot_type", type=str, choices = ['N', 'M', 'deltas', 'samples'], default = None, help="What kind of plot, default is no plot.")
     parser.add_argument("--plot_values", type=str, help="Comma-separated list of values for the selected plot type (e.g., 10,20,30).")
     args = parser.parse_args()
 
@@ -36,49 +35,44 @@ def main():
             option_pricing_obj = BSDEOptionPricingEuropean(args.S, args.K, args.r, args.sigma,
                                                            args.T, args.N, args.M, args.L,
                                                            args.samples, args.mu, args.opt_payoff,
-                                                           args.ydeg, args.zdeg, args.picard)
+                                                           args.domain, args.delta)
             price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
         elif args.opt_style == 'american':
             option_pricing_obj = BSDEOptionPricingAmerican(args.S, args.K, args.r, args.sigma,
                                                            args.T, args.N, args.M, args.L,
                                                            args.samples, args.mu, args.opt_payoff,
-                                                           args.ydeg, args.zdeg, args.picard)
+                                                           args.domain, args.delta)
         elif args.opt_style == 'europeanspread':
             option_pricing_obj = BSDEOptionPricingEuropeanSpread(args.S, args.K, args.r, args.sigma,
                                                                  args.T, args.N, args.M, args.L,
                                                                  args.samples, args.mu, args.opt_payoff,
-                                                                 args.ydeg, args.zdeg, args.picard, args.K2, args.R)
+                                                                 args.domain, args.delta, args.K2, args.R)
         elif args.opt_style == 'americanspread':
             option_pricing_obj = BSDEOptionPricingAmericanSpread(args.S, args.K, args.r, args.sigma,
                                                                  args.T, args.N, args.M, args.L,
                                                                  args.samples, args.mu, args.opt_payoff,
-                                                                 args.ydeg, args.zdeg, args.picard, args.K2, args.R)
-        if args.plot_type == "N": 
-            if not plot_values:
-                raise ValueError('No values given in --plot_values!')
+                                                                 args.domain, args.delta, args.K2, args.R)
+    else:
+        raise ValueError('Invalid option: {args.opt_style}')
+    if args.plot_type in ["N","M","deltas","samples"]:
+        if not plot_values:
+            raise ValueError('No plot values to plot.')
+        elif args.plot_type == "N": 
             print(f"Plotting by varying N with values: {args.plot_values}")
             option_pricing_obj.plot_and_show_table_by_N(plot_values, args.nofig, price)
         elif args.plot_type == "M":
-            if not plot_values:
-                raise ValueError('No values given in --plot_values!')
             print(f"Plotting by varying M with values: {args.plot_values}")
             option_pricing_obj.plot_and_show_table_by_M(plot_values, args.nofig, price)
-        elif args.plot_type == "degrees":
-            if not plot_values:
-                raise ValueError('No values given in --plot_values!')
+        elif args.plot_type == "deltas":
             print(f"Plotting by varying degrees with values: {args.plot_values}")
-            option_pricing_obj.plot_and_show_table_by_degree(plot_values, args.nofig, price)
-        elif args.plot_type == 'samples':
-            if not plot_values:
-                raise ValueError('No values given in --plot_values!')
+            option_pricing_obj.plot_and_show_table_by_deltas(plot_values, args.nofig, price)
+        elif args.plot_type == "samples":
             print(f"Plotting by varying samples size with values: {args.plot_values}")
             option_pricing_obj.plot_and_show_table_by_samples(plot_values, args.nofig, price)
-        else:  
-            option_pricing_obj.run()  
-            if price:
-                print(f"{args.opt_style.capitalize()} {args.opt_payoff} option price: {price:.4f}")
-    else:
-        raise ValueError('Invalid option: {args.opt_style}')
+    else:  
+        option_pricing_obj.run()  
+        if price:
+            print(f"{args.opt_style.capitalize()} {args.opt_payoff} option price: {price:.4f}")
 
    
 def black_scholes(S, K, T, r, sigma, opt_payoff):

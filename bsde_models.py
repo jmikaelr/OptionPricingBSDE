@@ -7,11 +7,30 @@ import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
 
-np.random.seed(0)
 
 class BSDEOptionPricingEuropean:
-    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level = 0.025, samples = 100,
-                 mu = 0.05, option_payoff="call", degree_y = 4, degree_z = 2, picard = 3):
+    """ 
+    Constructs an instance to price a vanilla European option.
+    Supports both put and call options with Laguerre or hybercube regression bases.
+
+    Attributes:
+        S0 (float): Initial stock price.
+        K (float): Strike price of the option.
+        r (float): Risk-free rate.
+        sigma (float): Volatility of the stock.
+        T (float): Time to maturity of the option.
+        N (int): Number of time steps in the discretization.
+        M (int): Number of simulated paths.
+        confidence_level (float): The alpha value for the confidence interval calculation.
+        samples (int): Number of BSDE samples to estimate the price.
+        mu (float): Drift rate of the stock, defaults to r if not provided.
+        option_payoff (str): Type of the option ('call' or 'put').
+        domain (list[int]): The domain which the hybercubes cover.
+        delta (float): The length of the hybercubes.
+        picard (int): Number of Picard iterations for updating Y.
+    """
+    def __init__(self, S0, K, r, sigma, T, N, M,  confidence_level = 0.025, 
+                 samples = 50, mu = 0, option_payoff="call", domain=None, delta= None):
         if not isinstance(S0, (int, float)) or S0 <= 0:
             raise ValueError('S0 must be positive.')
         if not isinstance(K, (int, float)) or K <= 0:
@@ -26,10 +45,8 @@ class BSDEOptionPricingEuropean:
             raise ValueError('N must be a positive integer or float.')
         if not isinstance(M, int) or M <= 0:
             raise ValueError('M must be a positive integer.')
-        if not isinstance(degree_y, int) or degree_y < 0:
-            raise ValueError('degree must be a non-negative integer.')
-        if not isinstance(degree_z, int) or degree_z < 0:
-            raise ValueError('degree must be a non-negative integer.')
+        if not isinstance(delta, (int, float)) or delta <= 0:
+            raise ValueError('delta must be an integer or float greater than zero')
         if not isinstance(confidence_level, float):
             raise ValueError('Lower confidence number msut be a float!')
 
@@ -42,27 +59,36 @@ class BSDEOptionPricingEuropean:
         self.N = N
         self.M = M
         self.option_payoff = self._get_opt_payoff(option_payoff)
-        self.degree_y = degree_y
-        self.degree_z = degree_z
+        self.domain = domain if isinstance(domain, list) and all(isinstance(i, int) for i in domain) else self._get_domain(domain)
+        self.delta = delta if delta != None else 1
         self.dt = T / N
         self.samples = samples
         self.confidence_level = confidence_level
         self.lamb = (mu - r)/(sigma) if mu is not None else 0 
-        self.picard = picard
         self._opt_style = 'european'
 
-        self._load_configs()
+    def _get_domain(self, domain):
+        """ Retrieves the domain from user """
+        if domain == None:
+            return [np.maximum(self.S0-50,0), np.maximum(self.S0+50), 0]
+        if domain == [0,0]:
+            raise ValueError('Error creating domain.')
+        joined_domain = ''.join(domain)
+        split_domain = joined_domain.split(',')
+        domain = [int(num) for num in split_domain]
+        return domain
 
     @property
     def opt_style(self):
         return self._opt_style
 
     def _load_configs(self):
+        """ Load configs for plotting and generating tables """
         with open('configs.yaml', 'r') as config_file:
-            self._configs = yaml.safe_load(config_file)
+            return yaml.safe_load(config_file)
 
     def _get_opt_payoff(self, opt_payoff):
-        """ Retrieves option payoff """
+        """ Retrieves the option payoff from user input """
         if not isinstance(opt_payoff, str):
             raise TypeError('Option type should be a string!')
         if opt_payoff.lower() == 'call':
@@ -73,7 +99,7 @@ class BSDEOptionPricingEuropean:
             raise TypeError('Invalid option type! It should be call or put')
 
     def _payoff_func(self, S):
-        """ Payoff function depending on the options payoff type """
+        """ Payoff function or exercise value for given S """  
         if self.option_payoff == "call":
             return np.maximum(S - self.K, 0) 
         elif self.option_payoff == "put":
@@ -81,29 +107,41 @@ class BSDEOptionPricingEuropean:
         else:
             raise ValueError(f"Invalid option type: {self.option_payoff}. Supported types are 'call' and 'put'.")
 
-    def _generate_regression(self, S):
-        """ Generates Laguerre polynomials up to degree self.degree_y """
-        if self.degree_y > 50 or self.degree_y < 1:
-            raise ValueError(f"Invalid degree on Polynomial basis, you chose: {self.degree_y}, choose between 1 and 50")
-        S_expanded = np.expand_dims(S, axis=-1)
-        basis_polynomials_y = np.array([np.polynomial.laguerre.Laguerre.basis(deg)(S_expanded) for deg in range(self.degree_y + 1)])
-        basis_polynomials_z = np.array([np.polynomial.laguerre.Laguerre.basis(deg)(S_expanded) for deg in range(self.degree_z + 1)])
-        p_y = np.transpose(basis_polynomials_y, (1, 2, 0)).reshape(S.shape[0], self.degree_y + 1)
-        p_z = np.transpose(basis_polynomials_z, (1, 2, 0)).reshape(S.shape[0], self.degree_z + 1)
-        return p_y, p_z
+    def _generate_hypercube_basis(self, S):
+        num_cubes = int((self.domain[1] - self.domain[0]) / self.delta)
+        indicators = np.zeros((S.shape[0], num_cubes))
+        for i in range(num_cubes):
+            cube_min = self.domain[0] + i * self.delta
+            cube_max = cube_min + self.delta
+            indicator = (S >= cube_min) & (S < cube_max)
+            indicators[:, i] = indicator.flatten().astype(int)
+        return indicators
 
     def _generate_stock_paths(self):
-        """Simulate Geometric Brownian Motion """ 
-        dt = self.T / self.N
-        dW = np.random.normal(0, np.sqrt(dt), (self.M, self.N))
+        """Simulates a Geometric Brownian Motion with initial start S0 """ 
+        dW = np.random.normal(0, np.sqrt(self.dt), (self.M, self.N))
         S = np.empty((self.M, self.N+1))
         S[:, 0] = self.S0  
-        log_S = np.cumsum((self.mu - 0.5 * self.sigma**2) * dt + self.sigma * dW, axis=1, out=S[:, 1:])
+        log_S = np.cumsum((self.mu - 0.5 * self.sigma**2) * self.dt + self.sigma * dW, axis=1, out=S[:, 1:])
         S[:, 1:] = self.S0 * np.exp(log_S)
         return S, dW
 
+    def _driver(self, Y_plus, Z):
+        """ Returns the driver in the BSDE with same interest for lending and borrowing """
+        return (Z*self.lamb + self.r*Y_plus)*self.dt
+
+    def _generate_alphas(self, Y_plus, S_i, dW):
+        """ Generate the alphas from regression """
+        p_li = self._generate_hypercube_basis(S_i) 
+        A = p_li.T @ p_li
+        b_z = p_li.T @ (Y_plus * dW)
+        b_y = p_li.T @ (Y_plus) 
+        alpha_z, _, _, _ = np.linalg.lstsq(A, b_z, rcond=None)
+        alpha_y, _, _, _ = np.linalg.lstsq(A, b_y, rcond=None)
+        return alpha_y, alpha_z, p_li
+
     def _bsde_solver(self):
-        """ Solves the BSDE equation for an european option using """
+        """ Solves the backward stochastic differential equation to estimate option prices. """
         Y0_samples = np.zeros(self.samples)
         Z0_samples = np.zeros(self.samples)
 
@@ -115,19 +153,9 @@ class BSDEOptionPricingEuropean:
             Y[:, -1] = self._payoff_func(S[:, -1])
 
             for i in range(self.N - 2, -1, -1):
-                X_y, X_z = self._generate_regression(S[:, i])
-                A_z = X_z.T @ X_z
-                A_y = X_y.T @ X_y
-                Y_prev = Y[:, i+1]
-                b_z = X_z.T @ (Y_prev * dW[:, i])
-                b_y = X_y.T @ Y_prev
-                alpha_z, _, _, _ = np.linalg.lstsq(A_z, b_z, rcond=None)
-                alpha_y, _, _, _ = np.linalg.lstsq(A_y, b_y, rcond=None)
-                Z[:, i] = (X_z @ alpha_z) / self.dt
-                Y[:, i] = X_y @ alpha_y 
-                Z_lamb = Z[: ,i]*self.lamb 
-                for _ in range(self.picard):
-                    Y[:, i] = Y_prev - (Z_lamb + self.r*Y[:, i])*self.dt
+                alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i])
+                Z[:, i] = (p_li @ alpha_z) / self.dt
+                Y[:, i] = (p_li @ alpha_y) + self._driver(Y[:, i+1], Z[:, i]) 
 
             Y0_samples[k] = np.mean(Y[:, 0])
             Z0_samples[k] = np.mean(Z[:, 0])
@@ -144,74 +172,93 @@ class BSDEOptionPricingEuropean:
         return mean_sample, std_sample, CI
 
     def plot_and_show_table_by_N(self, N_values, nofig=False, bs_price=None):
+        """ Plots and show tables by varying N """
         function_name = inspect.currentframe().f_code.co_name
-        prices, errors, rows = [], [], []
+        Y, Z, Y_errors, Z_errors, rows = [], [], [], [], []
 
         for N_val in N_values:
             self.N = N_val
-            Y0_array, _ = self._bsde_solver()
+            Y0_array, Z0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
-            prices.append(est_Y0)
-            errors.append(std_Y0)
-            rows.append([N_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1]])
+            est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
+
+            Y.append(est_Y0)
+            Z.append(est_Z0)
+            Y_errors.append(std_Y0)
+            Z_errors.append(std_Z0)
+            rows.append([N_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, CI_Z[0], CI_Z[1]])
             print(f'Done with N: {N_val}.')
 
-        self._generate_plot(N_values, prices, errors, function_name, bs_price, nofig)
-        self._generate_table(rows, function_name, prices)
+        self._generate_plot(N_values, Y, Y_errors, function_name, bs_price, nofig)
+        self._generate_table(rows, function_name)
 
     def plot_and_show_table_by_M(self, M_values, nofig=False, bs_price=None):
+        """ Plots and show tables by varying M """
         function_name = inspect.currentframe().f_code.co_name
-        prices, errors, rows = [], [], []
+        Y, Z, Y_errors, Z_errors, rows = [], [], [], [], []
 
         for M_val in M_values:
             self.M = M_val
-            Y0_array, _ = self._bsde_solver()
+            Y0_array, Z0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
-            prices.append(est_Y0)
-            errors.append(std_Y0)
-            rows.append([M_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1]])
+            est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
+
+            Y.append(est_Y0)
+            Z.append(est_Z0)
+            Y_errors.append(std_Y0)
+            Z_errors.append(std_Z0)
+            rows.append([M_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, CI_Z[0], CI_Z[1]])
             print(f'Done with M_val: {M_val}.')
 
-        self._generate_plot(M_values, prices, errors, function_name, bs_price, nofig)
-        self._generate_table(rows, function_name, prices)
+        self._generate_plot(M_values, Y, Y_errors, function_name, bs_price, nofig)
+        self._generate_table(rows, function_name)
 
-    def plot_and_show_table_by_degree(self, degrees, nofig=False, bs_price=None):
+    def plot_and_show_table_by_deltas(self, deltas, nofig=False, bs_price=None):
+        """ Plots and show tables by varying degrees """
         function_name = inspect.currentframe().f_code.co_name
-        prices, errors, rows = [], [], []
+        Y, Z, Y_errors, Z_errors, rows = [], [], [], [], []
 
-        for degree in degrees:
-            self.degree_y = degree
-            Y0_array, _ = self._bsde_solver()
+        for delta in deltas:
+            self.delta = delta 
+            Y0_array, Z0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
-            prices.append(est_Y0)
-            errors.append(std_Y0)
-            rows.append([degree, est_Y0, std_Y0, CI_Y[0], CI_Y[1]])
-            print(f'Done with degree: {degree}.')
+            est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
 
-        self._generate_plot(degrees, prices, errors, function_name, bs_price, nofig)
-        self._generate_table(rows, function_name, prices)
+            Y.append(est_Y0)
+            Z.append(est_Z0)
+            Y_errors.append(std_Y0)
+            Z_errors.append(std_Z0)
+            rows.append([delta, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, CI_Z[0], CI_Z[1]])
+            print(f'Done with degree: {delta}.')
+
+        self._generate_plot(deltas, Y, Y_errors, function_name, bs_price, nofig)
+        self._generate_table(rows, function_name)
 
     def plot_and_show_table_by_samples(self, samples, nofig=False, bs_price=None):
+        """ Plots and show tables by varying samples """
         function_name = inspect.currentframe().f_code.co_name
-        prices, errors, rows = [], [], []
+        Y, Z, Y_errors, Z_errors, rows = [], [], [], [], []
 
         for sample in samples:
             self.samples = sample
-            Y0_array, _ = self._bsde_solver()
+            Y0_array, Z0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
-            if sample == 1:
-                std_Y0 = 0
-                CI_Y = (0, 0)
-            prices.append(est_Y0)
-            errors.append(std_Y0)
-            rows.append([sample, est_Y0, std_Y0, CI_Y[0], CI_Y[1]])
+            est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
+
+            Y.append(est_Y0)
+            Z.append(est_Z0)
+            Y_errors.append(std_Y0)
+            Z_errors.append(std_Z0)
+            rows.append([sample, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, CI_Z[0], CI_Z[1]])
             print(f'Done with sample: {sample}.')
 
-        self._generate_plot(samples, prices, errors, function_name, bs_price, nofig)
-        self._generate_table(rows, function_name, prices)
+        self._generate_plot(samples, Y, Y_errors, function_name, bs_price, nofig)
+        self._generate_table(rows, function_name)
 
     def _generate_plot(self, x_values, y_values, y_errors, function_name, bs_price, nofig):
-        plot_config = self._configs['plot_config'][function_name]
+        """ Generates the plot with the configs in the yaml file """
+        configs = self._load_configs()
+        plot_config = configs['plot_config'][function_name]
 
         running_totals = np.cumsum(y_values)
         running_average = running_totals / np.arange(1, len(y_values) + 1)
@@ -229,7 +276,7 @@ class BSDEOptionPricingEuropean:
         plt.legend(loc=plot_config.get('legend_location', 'best'))
         plt.grid(plot_config.get('grid', True))
 
-        plot_directory = os.path.join(self._configs['general_settings']['plot_directory'], function_name)
+        plot_directory = os.path.join(configs['general_settings']['plot_directory'], function_name)
         os.makedirs(plot_directory, exist_ok=True)
 
         plot_name = plot_config['plot_name_template'].format(
@@ -237,7 +284,7 @@ class BSDEOptionPricingEuropean:
             opt_payoff=self.option_payoff,
             N=self.N,
             M=self.M,
-            degree=self.degree_y,
+            delta=self.delta,
             min_value=min(x_values),
             max_value=max(x_values)
         )
@@ -248,31 +295,32 @@ class BSDEOptionPricingEuropean:
             plt.show()
         plt.close()
 
-    def _generate_table(self, rows, function_name, prices):
-        table_directory = os.path.join(self._configs['general_settings']['table_directory'], function_name)
+    def _generate_table(self, rows, function_name):
+        """ Generates the table with the configs in the yaml file """
+        configs = self._load_configs()
+        table_directory = os.path.join(configs['general_settings']['table_directory'], function_name)
         os.makedirs(table_directory, exist_ok=True)
 
         first_elements = [row[0] for row in rows]
+        
+        columns = (
+            [function_name.split('_')[-1].capitalize(), 'Estimated Price Y0', 'Std. Deviation Y0',
+            'CI Lower Bound Y0', 'CI Upper Bound Y0','Estimated Volatility Z0', 
+            'Std. Deviation Z0', 'CI Lower Bound Z0', 'CI Upper Bound Z0']
+        )
 
-        running_totals = np.cumsum(prices)
-        running_average = running_totals / np.arange(1, len(prices) + 1)
-
-        for i, row in enumerate(rows):
-            row.append(running_average[i])
-
-        table_name = self._configs['plot_config'][function_name]['table_name_template'].format(
+        table_name = configs['plot_config'][function_name]['table_name_template'].format(
             opt_style=self.opt_style,
             opt_payoff=self.option_payoff,
             N=self.N,
             M=self.M,
-            degree=self.degree_y,
+            delta=self.delta,
             min_value=min(first_elements),
             max_value=max(first_elements)
         )
 
         table_path = os.path.join(table_directory, table_name)
-        
-        df = pd.DataFrame(rows, columns=[function_name.split('_')[-1], 'Estimated Price', 'Std. Deviation', 'CI Lower Bound', 'CI Upper Bound', 'Running Average Price'])
+        df = pd.DataFrame(rows, columns=columns)
         df.to_csv(table_path, index=False)
         print(f"Table saved to {table_path}")
 
@@ -305,19 +353,20 @@ class BSDEOptionPricingEuropean:
                 f"  samples={self.samples},\n"
                 f"  mu={self.mu},\n"
                 f"  option_payoff='{self.option_payoff}',\n"
-                f"  degree_y={self.degree_y},\n"
-                f"  degree_z={self.degree_z},\n"
-                f"  picard={self.picard}\n)")
+                f"  domain={self.domain},\n"
+                f"  delta={self.delta},\n"
+        )
+
 
 class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
-    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level=0.025, samples=100, 
-                mu=0.05, option_payoff="call", degree_y=3, degree_z=3, picard=3):
+    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, 
+                 mu, option_payoff, domain, delta): 
         super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, mu, 
-                         option_payoff, degree_y, degree_z, picard)
+                         option_payoff, domain, delta)
         self._opt_style = 'american'
 
     def _bsde_solver(self):
-        """ Solves the BSDE equation for an european option using """
+        """ Solves the backward stochastic differential equation to estimate option prices. """
         Y0_samples = np.zeros(self.samples)
         Z0_samples = np.zeros(self.samples)
 
@@ -330,20 +379,9 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
             Y[:, -1] = exercise_values[:, -1] 
 
             for i in range(self.N - 2, -1, -1):
-                X_y, X_z = self._generate_regression(S[:, i])
-                A_z = X_z.T @ X_z
-                A_y = X_y.T @ X_y
-                Y_prev = Y[:, i+1]
-                b_z = X_z.T @ (Y_prev * dW[:, i])
-                b_y = X_y.T @ Y_prev
-                alpha_z, _, _, _ = np.linalg.lstsq(A_z, b_z, rcond=None)
-                alpha_y, _, _, _ = np.linalg.lstsq(A_y, b_y, rcond=None)
-                Z[:, i] = (X_z @ alpha_z) / self.dt
-                Y[:, i] = X_y @ alpha_y 
-                Z_lamb = Z[: ,i]*self.lamb 
-                #for _ in range(self.picard):
-                    #Y[:, i] = Y_prev - (Z_lamb + self.r*Y[:, i])*self.dt
-
+                alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i])
+                Z[:, i] = (p_li @ alpha_z) / self.dt
+                Y[:, i] = (p_li @ alpha_y) + self._driver(Y[:, i+1], Z[:, i]) 
                 Y[:, i] = np.maximum(Y[:, i], exercise_values[:, i])
 
             Y0_samples[k] = np.mean(Y[:, 0])
@@ -353,15 +391,20 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
 
     def __repr__(self):
         base_repr = super().__repr__()
-
         return base_repr[:-1] + f" opt_style='{self._opt_style}'\n)"
 
 
 class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
-    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, degree_y, degree_z, picard, K2, R):
-        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, degree_y, degree_z, picard)
-        self.K2 = 105 if K2 is None else K2 
-        self.R = 0.06 if R is None else R 
+    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, domain, delta, K2, R):
+        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, domain, delta) 
+        if K2 is None:
+            raise ValueError('K2 must be specified for a spread option.')
+        if K2 <= K:
+            raise ValueError('K2 must be greater than K for a spread to make sense.')
+        if R is None:
+            raise ValueError('No second interest rate given.')
+        self.K2 = K2 
+        self.R = R 
         self._opt_style = 'europeanspread'
 
     def _payoff_func(self, S):
@@ -370,107 +413,25 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
         else:
             raise ValueError(f"Invalid option type: {self.option_payoff}. Supported types are 'call'.")
 
+    def _driver(self, Y_plus, Z):
+        """ Returns the driver in the BSDE for different interest rates for borrowing and lending """
+        return (Y_plus*self.r + Z * self.lamb - (self.R-self.r)*np.minimum((Y_plus - (Z/self.sigma)), 0)) * self.dt
+
     def _bsde_solver(self):
+        """ Solves the backward stochastic differential equation to estimate option prices. """
         Y0_samples = np.zeros(self.samples)
         Z0_samples = np.zeros(self.samples)
 
         for k in range(self.samples):
             S, dW = self._generate_stock_paths()
-            Y = np.zeros((self.M, self.N))
+            Y = np.zeros((self.M, self.N + 1))
             Z = np.zeros((self.M, self.N))
-            E = np.zeros((self.M, self.N))
-
             Y[:, -1] = self._payoff_func(S[:, -1])
 
-#            for i in range(self.N - 1, -1, -1):
-#                X_y, X_z = self._generate_regression(S[:, i])
-#                L_z = np.linalg.cholesky(X_z.T @ X_z)
-#                L_y = np.linalg.cholesky(X_y.T @ X_y)
-#                z_z = np.linalg.solve(L_z, X_z.T @ (Y[:, i] * dW[:, i]))
-#                z_y = np.linalg.solve(L_y, X_y.T @ Y[:, i])
-#                alpha_z = np.linalg.lstsq(L_z.T, z_z, rcond=None)[0]
-#                alpha_y = np.linalg.lstsq(L_y.T, z_y, rcond=None)[0]
-#                print(alpha_y)
-#                Z[:, i] = (X_z @ alpha_z) / self.dt 
-#                E[:, i] = X_y @ alpha_y
-#                if i == self.N - 2:
-#                    return
-#                for _ in range(self.picard):
-#                    Y[:, i] = E[:, i] + (-self.r*Y[:, i] - Z[:, i] * self.lamb + (self.R-self.r)*np.minimum(Y[:, i] - Z[:, i], 0)) * self.dt
-            for i in range(self.N - 2, -1, -1):
-                X_y, X_z = self._generate_regression(S[:, i])
-
-                A_z = X_z.T @ X_z
-                A_y = X_y.T @ X_y
-                
-                b_z = X_z.T @ (Y[:, i+1] * dW[:, i])
-                b_y = X_y.T @ Y[:, i+1]
-
-                # Directly compute the regression coefficients using least squares
-                alpha_z, _, _, _ = np.linalg.lstsq(A_z, b_z, rcond=None)
-                alpha_y, _, _, _ = np.linalg.lstsq(A_y, b_y, rcond=None)
-
-                Z[:, i] = (X_z @ alpha_z) / self.dt
-                E[:, i] = X_y @ alpha_y
-                #print("E[:, i]:", E[:, i])
-                for _ in range(self.picard):
-                    Y[:, i] = E[:, i] + (-self.r*Y[:, i] - Z[:, i] * self.lamb + (self.R-self.r)*np.minimum(Y[:, i] - Z[:, i]/self.sigma, 0)) * self.dt
-
-                
-            Y0_samples[k] = np.mean(Y[:, 0])
-            Z0_samples[k] = np.mean(Z[:, 0])               
-
-        return Y0_samples, Z0_samples
-
-    def __repr__(self):
-        base_repr = super().__repr__()
-        return base_repr[:-1] + f"  opt_style='{self._opt_style}'\n  K2='{self.K2}'\n  R='{self.R}'\n)"
-
-
-class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropean):
-    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, degree_y, degree_z, picard, K2, R):
-        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, degree_y, degree_z, picard)
-        self.K2 = 105 if K2 is None else K2 
-        self.R = 0.06 if R is None else R 
-        self.K2 = 105 if K2 is None else K2 
-        self.R = 0.06 if R is None else R 
-        self._opt_style = 'americanspread'
-
-    def _payoff_func(self, S):
-        if self.option_payoff == "call":
-            return (np.maximum(S - self.K, 0) - 2*np.maximum(S - self.K2, 0))
-        else:
-            raise ValueError(f"Invalid option type: {self.option_payoff}. Supported types are 'call'.")
-
-    def _bsde_solver(self):
-        Y0_samples = np.zeros(self.samples)
-        Z0_samples = np.zeros(self.samples)
-
-        for k in range(self.samples):
-            S, dW = self._generate_stock_paths()
-            Y = np.zeros((self.M, self.N))
-            Z = np.zeros((self.M, self.N))
-
-            exercise_values = self._payoff_func(S)
-            Y[:, self.N - 1] = exercise_values[:, self.N - 1]
-
-            for i in range(self.N - 2, -1, -1):
-                X_y, X_z = self._generate_regression(S[:, i])
-                A_z = X_z.T @ X_z
-                A_y = X_y.T @ X_y
-                Y_prev = Y[:, i+1]
-                b_z = X_z.T @ (Y_prev * dW[:, i])
-                b_y = X_y.T @ Y_prev
-                alpha_z, _, _, _ = np.linalg.lstsq(A_z, b_z, rcond=None)
-                alpha_y, _, _, _ = np.linalg.lstsq(A_y, b_y, rcond=None)
-                Z[:, i] = (X_z @ alpha_z) / self.dt
-                Y[:, i] = X_y @ alpha_y 
-                Z_lamb = Z[: ,i]*self.lamb 
-                for _ in range(self.picard):
-                    Y[:, i] = (Y_prev - (Y[:, i]*self.r + Z_lamb - 
-                        (self.R-self.r)*np.minimum((Y[:, i] - (Z[:, i]/self.sigma)), 0)) * self.dt)
-
-                Y[:, i] = np.maximum(Y[:, i], exercise_values[:, i])
+            for i in range(self.N - 1, -1, -1): 
+                alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i])
+                Z[:, i] = (p_li @ alpha_z) / self.dt
+                Y[:, i] = (p_li @ alpha_y) + self._driver(Y[:, i+1], Z[:, i])
 
             Y0_samples[k] = np.mean(Y[:, 0])
             Z0_samples[k] = np.mean(Z[:, 0])
@@ -479,4 +440,34 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropean):
 
     def __repr__(self):
         base_repr = super().__repr__()
-        return base_repr[:-1] + f"  opt_style='{self._opt_style}'\n  K2='{self.K2}'\n  R='{self.R}'\n)"
+        return base_repr[:-1] + f"\n  opt_style='{self._opt_style}'\n  K2='{self.K2}'\n  R='{self.R}'\n)"
+
+
+class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropeanSpread):
+    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, domain, delta, K2, R):
+        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, domain, delta, K2, R)
+        self._opt_style = 'americanspread'
+
+    def _bsde_solver(self):
+        """ Solves the backward stochastic differential equation to estimate option prices. """
+        Y0_samples = np.zeros(self.samples)
+        Z0_samples = np.zeros(self.samples)
+
+        for k in range(self.samples):
+            S, dW = self._generate_stock_paths()
+            Y = np.zeros((self.M, self.N + 1))
+            Z = np.zeros((self.M, self.N))
+
+            exercise_values = self._payoff_func(S)
+            Y[:, -1] = self._payoff_func(S[:, -1])
+
+            for i in range(self.N - 1, -1, -1): 
+                alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i])
+                Z[:, i] = (p_li @ alpha_z) / self.dt
+                Y[:, i] = (p_li @ alpha_y) + self._driver(Y[:, i+1], Z[:, i])
+                Y[:, i] = np.maximum(Y[:, i], exercise_values[:, i])
+
+            Y0_samples[k] = np.mean(Y[:, 0])
+            Z0_samples[k] = np.mean(Z[:, 0])
+
+        return Y0_samples, Z0_samples

@@ -1,12 +1,23 @@
 #!/bin/bash
 
-python3 -m venv optbsde || { echo "Failed to create virtual environment"; exit 1; }
+if ! command -v python3 &>/dev/null; then
+    echo "Python 3 is not installed. Please install Python 3 before running this script."
+    exit 1
+fi
 
-source optbsde/bin/activate || { echo "Failed to activate virtual environment"; exit 1; }
+if ! command -v pip3 &>/dev/null; then
+    echo "pip3 is not installed. Please install pip3 before running this script."
+    exit 1
+fi
 
-pip install --upgrade pip || { echo "Failed to upgrade pip"; exit 1; }
+echo "Creating a Python virtual environment..."
+python3 -m venv venv
 
-pip install pandas scipy numpy matplotlib || { echo "Failed to install packages"; exit 1; }
+echo "Activating the virtual environment..."
+source venv/bin/activate
 
-echo "Setup completed successfully."
+pip3 install numpy pandas matplotlib scipy pyyaml
+
+echo "Setup is complete. Your Python environment is ready."
+echo "To activate your environment, use the command: source venv/bin/activate"
 
