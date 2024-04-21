@@ -128,14 +128,14 @@ class BSDEOptionPricingEuropean:
 
     def _driver(self, Y_plus, Z):
         """ Returns the driver in the BSDE with same interest for lending and borrowing """
-        return (Z*self.lamb + self.r*Y_plus)*self.dt
+        return -(Z*self.lamb + self.r*Y_plus)
 
     def _generate_alphas(self, Y_plus, S_i, dW):
         """ Generate the alphas from regression """
         p_li = self._generate_hypercube_basis(S_i) 
         A = p_li.T @ p_li
         b_z = p_li.T @ (Y_plus * dW)
-        b_y = p_li.T @ (Y_plus) 
+        b_y = p_li.T @ (Y_plus)
         alpha_z, _, _, _ = np.linalg.lstsq(A, b_z, rcond=None)
         alpha_y, _, _, _ = np.linalg.lstsq(A, b_y, rcond=None)
         return alpha_y, alpha_z, p_li
@@ -155,7 +155,7 @@ class BSDEOptionPricingEuropean:
             for i in range(self.N - 2, -1, -1):
                 alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i])
                 Z[:, i] = (p_li @ alpha_z) / self.dt
-                Y[:, i] = (p_li @ alpha_y) + self._driver(Y[:, i+1], Z[:, i]) 
+                Y[:, i] = (p_li @ alpha_y) - self. dt * self._driver(Y[:, i+1], Z[:, i]) 
 
             Y0_samples[k] = np.mean(Y[:, 0])
             Z0_samples[k] = np.mean(Z[:, 0])
@@ -382,7 +382,7 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
             for i in range(self.N - 2, -1, -1):
                 alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i])
                 Z[:, i] = (p_li @ alpha_z) / self.dt
-                Y[:, i] = (p_li @ alpha_y) + self._driver(Y[:, i+1], Z[:, i]) 
+                Y[:, i] = (p_li @ alpha_y) - self.dt * self._driver(Y[:, i+1], Z[:, i]) 
                 Y[:, i] = np.maximum(Y[:, i], exercise_values[:, i])
 
             Y0_samples[k] = np.mean(Y[:, 0])
@@ -416,7 +416,7 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
 
     def _driver(self, Y_plus, Z):
         """ Returns the driver in the BSDE for different interest rates for borrowing and lending """
-        return (Y_plus*self.r + Z * self.lamb - (self.R-self.r)*np.minimum((Y_plus - (Z/self.sigma)), 0)) * self.dt
+        return -(Y_plus*self.r + Z * self.lamb - (self.R-self.r)*np.minimum((Y_plus - (Z/self.sigma)), 0)) 
 
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
@@ -430,9 +430,9 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
             Y[:, -1] = self._payoff_func(S[:, -1])
 
             for i in range(self.N - 1, -1, -1): 
-                alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i])
+                alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i]) 
                 Z[:, i] = (p_li @ alpha_z) / self.dt
-                Y[:, i] = (p_li @ alpha_y) + self._driver(Y[:, i+1], Z[:, i])
+                Y[:, i] = (p_li @ alpha_y) - self.dt * self._driver(Y[:, i+1], Z[:, i])
 
             Y0_samples[k] = np.mean(Y[:, 0])
             Z0_samples[k] = np.mean(Z[:, 0])
@@ -465,7 +465,7 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropeanSpread):
             for i in range(self.N - 1, -1, -1): 
                 alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i])
                 Z[:, i] = (p_li @ alpha_z) / self.dt
-                Y[:, i] = (p_li @ alpha_y) + self._driver(Y[:, i+1], Z[:, i])
+                Y[:, i] = (p_li @ alpha_y) - self.dt * self._driver(Y[:, i+1], Z[:, i])
                 Y[:, i] = np.maximum(Y[:, i], exercise_values[:, i])
 
             Y0_samples[k] = np.mean(Y[:, 0])

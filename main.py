@@ -28,7 +28,7 @@ def main():
     parser.add_argument("--plot_values", type=str, help="Comma-separated list of values for the selected plot type (e.g., 10,20,30).")
     args = parser.parse_args()
 
-    plot_values = [float(x) for x in args.plot_values.split(',')] if args.plot_values else None
+    plot_values = [int(x) for x in args.plot_values.split(',')] if args.plot_values else None
     price = None
     if args.opt_style in ['european', 'americanspread', 'europeanspread', 'american']:
         if args.opt_style == 'european':
