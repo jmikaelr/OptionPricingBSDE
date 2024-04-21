@@ -15,7 +15,7 @@ def main():
     parser.add_argument("--sigma", type=float, default=0.2, help="Volatility (sigma)")
     parser.add_argument("--T", type=float, default=0.25, help="Time to expiration (in years)")
     parser.add_argument("--N", type=int, default=20, help="Number of time steps")
-    parser.add_argument("--M", type=int, default=5000, help="Number of Monte Carlo simulations")
+    parser.add_argument("--M", type=int, default=32768, help="Number of Monte Carlo simulations")
     parser.add_argument("--L", type=float, default=0.025, help="confidence alpha")
     parser.add_argument("--delta", type=float, default=1, help="Length of hybercubes")
     parser.add_argument("--domain", type=list, default=[40,180], help="The domain which the hybercubes cover")

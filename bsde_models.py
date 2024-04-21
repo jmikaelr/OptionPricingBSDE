@@ -130,15 +130,17 @@ class BSDEOptionPricingEuropean:
         """ Returns the driver in the BSDE with same interest for lending and borrowing """
         return -(Z*self.lamb + self.r*Y_plus)
 
-    def _generate_alphas(self, Y_plus, S_i, dW):
-        """ Generate the alphas from regression """
-        p_li = self._generate_hypercube_basis(S_i) 
-        A = p_li.T @ p_li
+    def _generate_Z(self, p_li, A, Y_plus, dW):
+        """ Generates the conditional expectation for Z at time t_i """
         b_z = p_li.T @ (Y_plus * dW)
-        b_y = p_li.T @ (Y_plus)
         alpha_z, _, _, _ = np.linalg.lstsq(A, b_z, rcond=None)
+        return (p_li @ alpha_z) / self.dt
+
+    def _generate_Y(self, p_li, A, Y_plus, Z):
+        """ Generates the conditional expectation for Y at time t_i """
+        b_y = p_li.T @ (Y_plus + self.dt * self._driver(Y_plus, Z))
         alpha_y, _, _, _ = np.linalg.lstsq(A, b_y, rcond=None)
-        return alpha_y, alpha_z, p_li
+        return (p_li @ alpha_y) 
 
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
@@ -153,9 +155,10 @@ class BSDEOptionPricingEuropean:
             Y[:, -1] = self._payoff_func(S[:, -1])
 
             for i in range(self.N - 2, -1, -1):
-                alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i])
-                Z[:, i] = (p_li @ alpha_z) / self.dt
-                Y[:, i] = (p_li @ alpha_y) - self. dt * self._driver(Y[:, i+1], Z[:, i]) 
+                p_li = self._generate_hypercube_basis(S[:, [i]])
+                A = p_li.T @ p_li
+                Z[:, i] = self._generate_Z(p_li, A, Y[:, i+1], dW[:, i])
+                Y[:, i] = self._generate_Y(p_li, A, Y[:, i+1], Z[:, i])
 
             Y0_samples[k] = np.mean(Y[:, 0])
             Z0_samples[k] = np.mean(Z[:, 0])
@@ -380,9 +383,10 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
             Y[:, -1] = exercise_values[:, -1] 
 
             for i in range(self.N - 2, -1, -1):
-                alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i])
-                Z[:, i] = (p_li @ alpha_z) / self.dt
-                Y[:, i] = (p_li @ alpha_y) - self.dt * self._driver(Y[:, i+1], Z[:, i]) 
+                p_li = self._generate_hypercube_basis(S[:, [i]])
+                A = p_li.T @ p_li
+                Z[:, i] = self._generate_Z(p_li, A, Y[:, i+1], dW[:, i])
+                Y[:, i] = self._generate_Y(p_li, A, Y[:, i+1], Z[:, i])
                 Y[:, i] = np.maximum(Y[:, i], exercise_values[:, i])
 
             Y0_samples[k] = np.mean(Y[:, 0])
@@ -416,7 +420,7 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
 
     def _driver(self, Y_plus, Z):
         """ Returns the driver in the BSDE for different interest rates for borrowing and lending """
-        return -(Y_plus*self.r + Z * self.lamb - (self.R-self.r)*np.minimum((Y_plus - (Z/self.sigma)), 0)) 
+        return -(Y_plus*self.R + Z * self.lamb - (self.R-self.r)*np.minimum(Y_plus - Z/self.sigma, 0)) 
 
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
@@ -430,9 +434,10 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
             Y[:, -1] = self._payoff_func(S[:, -1])
 
             for i in range(self.N - 1, -1, -1): 
-                alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i]) 
-                Z[:, i] = (p_li @ alpha_z) / self.dt
-                Y[:, i] = (p_li @ alpha_y) - self.dt * self._driver(Y[:, i+1], Z[:, i])
+                p_li = self._generate_hypercube_basis(S[:, [i]])
+                A = p_li.T @ p_li
+                Z[:, i] = self._generate_Z(p_li, A, Y[:, i+1], dW[:, i])
+                Y[:, i] = self._generate_Y(p_li, A, Y[:, i+1], Z[:, i])
 
             Y0_samples[k] = np.mean(Y[:, 0])
             Z0_samples[k] = np.mean(Z[:, 0])
@@ -463,9 +468,10 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropeanSpread):
             Y[:, -1] = self._payoff_func(S[:, -1])
 
             for i in range(self.N - 1, -1, -1): 
-                alpha_y, alpha_z, p_li = self._generate_alphas(Y[:, i+1], S[:, [i]], dW[:, i])
-                Z[:, i] = (p_li @ alpha_z) / self.dt
-                Y[:, i] = (p_li @ alpha_y) - self.dt * self._driver(Y[:, i+1], Z[:, i])
+                p_li = self._generate_hypercube_basis(S[:, [i]])
+                A = p_li.T @ p_li
+                Z[:, i] = self._generate_Z(p_li, A, Y[:, i+1], dW[:, i])
+                Y[:, i] = self._generate_Y(p_li, A, Y[:, i+1], Z[:, i])
                 Y[:, i] = np.maximum(Y[:, i], exercise_values[:, i])
 
             Y0_samples[k] = np.mean(Y[:, 0])
