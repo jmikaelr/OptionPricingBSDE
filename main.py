@@ -19,7 +19,7 @@ def main():
     parser.add_argument("--L", type=float, default=0.025, help="confidence alpha")
     parser.add_argument("--delta", type=float, default=1, help="Length of hybercubes")
     parser.add_argument("--domain", type=list, default=[40,180], help="The domain which the hybercubes cover")
-    parser.add_argument("--samples", type=int, default=10, help="Number of samples of solved BSDEs prices")
+    parser.add_argument("--samples", type=int, default=50, help="Number of samples of solved BSDEs prices")
     parser.add_argument("--opt_payoff", type=str, choices=['call', 'put'], default='call', help="Option payoff (either 'call' or 'put')")
     parser.add_argument("--opt_style", type=str, choices=['european', 'american', 'europeanspread', 'americanspread'], default='european', help="Option style")
     parser.add_argument("--nofig", action='store_true', help="Do not show plot. It plots by default.") 

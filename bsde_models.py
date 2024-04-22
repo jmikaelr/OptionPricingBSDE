@@ -263,11 +263,7 @@ class BSDEOptionPricingEuropean:
         configs = self._load_configs()
         plot_config = configs['plot_config'][function_name]
 
-        running_totals = np.cumsum(y_values)
-        running_average = running_totals / np.arange(1, len(y_values) + 1)
-
         plt.errorbar(x_values, y_values, yerr=y_errors, fmt='-o', capsize=5, capthick=2, ecolor='red', label='Option Price')
-        plt.plot(x_values, running_average, 'b--', label='Running Average Price')
 
         if bs_price is not None:
             plt.plot(x_values, [bs_price] * len(x_values), 'k-', label='Black-Scholes Price')
@@ -324,7 +320,8 @@ class BSDEOptionPricingEuropean:
 
         table_path = os.path.join(table_directory, table_name)
         df = pd.DataFrame(rows, columns=columns)
-        df.to_csv(table_path, index=False)
+        df_rounded = df.round(4)
+        df_rounded.to_csv(table_path, index=False)
         print(f"Table saved to {table_path}")
 
     def run(self):
