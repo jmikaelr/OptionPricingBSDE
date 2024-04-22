@@ -148,12 +148,12 @@ class BSDEOptionPricingEuropean:
 
         for k in range(self.samples):
             S, dW = self._generate_stock_paths()
-            Y = np.zeros((self.M, self.N))
+            Y = np.zeros((self.M, self.N + 1))
             Z = np.zeros((self.M, self.N))
 
             Y[:, -1] = self._payoff_func(S[:, -1])
 
-            for i in range(self.N - 2, -1, -1):
+            for i in range(self.N - 1, -1, -1):
                 p_li = self._generate_hypercube_basis(S[:, [i]])
                 A = p_li.T @ p_li
                 Z[:, i] = self._generate_Z(p_li, A, Y[:, i+1], dW[:, i])
@@ -375,13 +375,13 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
 
         for k in range(self.samples):
             S, dW = self._generate_stock_paths()
-            Y = np.zeros((self.M, self.N))
+            Y = np.zeros((self.M, self.N + 1))
             Z = np.zeros((self.M, self.N))
 
             exercise_values = self._payoff_func(S)
             Y[:, -1] = exercise_values[:, -1] 
 
-            for i in range(self.N - 2, -1, -1):
+            for i in range(self.N - 1, -1, -1):
                 p_li = self._generate_hypercube_basis(S[:, [i]])
                 A = p_li.T @ p_li
                 Z[:, i] = self._generate_Z(p_li, A, Y[:, i+1], dW[:, i])
