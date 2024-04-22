@@ -27,7 +27,6 @@ class BSDEOptionPricingEuropean:
         option_payoff (str): Type of the option ('call' or 'put').
         domain (list[int]): The domain which the hybercubes cover.
         delta (float): The length of the hybercubes.
-        picard (int): Number of Picard iterations for updating Y.
     """
     def __init__(self, S0, K, r, sigma, T, N, M,  confidence_level = 0.025, 
                  samples = 50, mu = None, option_payoff="call", domain=None, delta= None):
