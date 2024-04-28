@@ -58,7 +58,7 @@ class BSDEOptionPricingEuropean:
         self.N = N
         self.M = M
         self.option_payoff = self._get_opt_payoff(option_payoff)
-        self.domain = domain if isinstance(domain, list) and all(isinstance(i, int) for i in domain) else self._get_domain(domain)
+        self.domain = self._get_domain(domain) 
         self.delta = delta if delta != None else 1
         self.dt = T / N
         self.samples = samples
@@ -68,13 +68,15 @@ class BSDEOptionPricingEuropean:
 
     def _get_domain(self, domain):
         """ Retrieves the domain from user """
-        if domain == None:
-            return [np.maximum(self.S0-50,0), np.maximum(self.S0+50), 0]
-        if domain == [0,0]:
-            raise ValueError('Error creating domain.')
-        joined_domain = ''.join(domain)
+        if not domain:
+            return domain
+        joined_domain = ''.join(str(domain))
         split_domain = joined_domain.split(',')
         domain = [int(num) for num in split_domain]
+        if domain[0] > domain[1]:
+            raise ValueError("Lower boundary higher than upper boundary!")
+        if domain[0] < 0 or domain[1] < 0:
+            raise ValueError("Boundaries must be positive!")
         return domain
 
     @property
@@ -123,6 +125,8 @@ class BSDEOptionPricingEuropean:
         S[:, 0] = self.S0  
         log_S = np.cumsum((self.mu - 0.5 * self.sigma**2) * self.dt + self.sigma * dW, axis=1, out=S[:, 1:])
         S[:, 1:] = self.S0 * np.exp(log_S)
+        if not self.domain:
+            self.domain = [np.min(S), np.max(S)]
         return S, dW
 
     def _driver(self, Y_plus, Z):

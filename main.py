@@ -18,7 +18,7 @@ def main():
     parser.add_argument("--M", type=int, default=32768, help="Number of Monte Carlo simulations")
     parser.add_argument("--L", type=float, default=0.025, help="confidence alpha")
     parser.add_argument("--delta", type=float, default=1, help="Length of hybercubes")
-    parser.add_argument("--domain", type=list, default=[40,180], help="The domain which the hybercubes cover")
+    parser.add_argument("--domain", type=str, default=None, help="The domain which the hybercubes cover")
     parser.add_argument("--samples", type=int, default=50, help="Number of samples of solved BSDEs prices")
     parser.add_argument("--opt_payoff", type=str, choices=['call', 'put'], default='call', help="Option payoff (either 'call' or 'put')")
     parser.add_argument("--opt_style", type=str, choices=['european', 'american', 'europeanspread', 'americanspread'], default='european', help="Option style")
