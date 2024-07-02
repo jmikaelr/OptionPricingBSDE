@@ -11,7 +11,8 @@ def main():
     parser.add_argument("--K2", type=float, default=None, help="Second strike price")
     parser.add_argument("--r", type=float, default=0.01, help="Rate")
     parser.add_argument("--R", type=float, default=None, help="Second rate")
-    parser.add_argument("--mu", type=float, default=None, help="Drift term on stock")
+    parser.add_argument("--dims", type=int, default=1, help="Number of risky assets (stocks), default is one.")
+    parser.add_argument("--mu", type=float, default=0.01, help="Drift term on stock")
     parser.add_argument("--sigma", type=float, default=0.2, help="Volatility (sigma)")
     parser.add_argument("--T", type=float, default=0.25, help="Time to expiration (in years)")
     parser.add_argument("--N", type=int, default=20, help="Number of time steps")
@@ -34,26 +35,32 @@ def main():
     price = None
     if args.opt_style in ['european', 'americanspread', 'europeanspread', 'american']:
         if args.opt_style == 'european':
-            option_pricing_obj = BSDEOptionPricingEuropean(args.S, args.K, args.r, args.sigma,
-                                                           args.T, args.N, args.M, args.L,
-                                                           args.samples, args.mu, args.opt_payoff,
-                                                           args.domain, args.delta)
+            option_pricing_obj = BSDEOptionPricingEuropean(args.S, args.mu, args.sigma, args.K,
+                                                           args.r, args.T, args.N, args.M, 
+                                                           args.L, args.samples, args.dims, 
+                                                           args.opt_payoff, args.domain, 
+                                                           args.delta)
             price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
         elif args.opt_style == 'american':
-            option_pricing_obj = BSDEOptionPricingAmerican(args.S, args.K, args.r, args.sigma,
-                                                           args.T, args.N, args.M, args.L,
-                                                           args.samples, args.mu, args.opt_payoff,
-                                                           args.domain, args.delta)
+            option_pricing_obj = BSDEOptionPricingAmerican(args.S, args.mu, args.sigma, args.K,
+                                                           args.r, args.T, args.N, args.M, 
+                                                           args.L, args.samples, args.dims, 
+                                                           args.opt_payoff, args.domain, 
+                                                           args.delta)
         elif args.opt_style == 'europeanspread':
-            option_pricing_obj = BSDEOptionPricingEuropeanSpread(args.S, args.K, args.r, args.sigma,
-                                                                 args.T, args.N, args.M, args.L,
-                                                                 args.samples, args.mu, args.opt_payoff,
-                                                                 args.domain, args.delta, args.K2, args.R)
+            option_pricing_obj = BSDEOptionPricingEuropeanSpread(args.S, args.mu, args.sigma, 
+                                                                 args.K, args.r, args.T, args.N, 
+                                                                 args.M, args.L, args.samples, 
+                                                                 args.dims, args.opt_payoff, 
+                                                                 args.domain, args.delta, 
+                                                                 args.K2, args.R)
         elif args.opt_style == 'americanspread':
-            option_pricing_obj = BSDEOptionPricingAmericanSpread(args.S, args.K, args.r, args.sigma,
-                                                                 args.T, args.N, args.M, args.L,
-                                                                 args.samples, args.mu, args.opt_payoff,
-                                                                 args.domain, args.delta, args.K2, args.R)
+            option_pricing_obj = BSDEOptionPricingAmericanSpread(args.S, args.mu, args.sigma, 
+                                                                 args.K, args.r, args.T, args.N, 
+                                                                 args.M, args.L, args.samples, 
+                                                                 args.dims, args.opt_payoff, 
+                                                                 args.domain, args.delta, 
+                                                                 args.K2, args.R)
         
         if args.plot_type in ["N","M","deltas","samples"]:
             if not plot_values:

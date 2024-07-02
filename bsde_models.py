@@ -28,18 +28,14 @@ class BSDEOptionPricingEuropean:
         domain (list[int]): The domain which the hybercubes cover.
         delta (float): The length of the hybercubes.
     """
-    def __init__(self, S0, K, r, sigma, T, N, M,  confidence_level = 0.025, 
-                 samples = 50, mu = None, option_payoff="call", domain=None, delta= None):
-        if not isinstance(S0, (int, float)) or S0 <= 0:
-            raise ValueError('S0 must be positive.')
+    def __init__(self, S0, mu, sigma, K, r, T, N, M,  confidence_level = 0.025, 
+                 samples = 50, dims = 1, option_payoff="call", domain=None, delta= None):
         if not isinstance(K, (int, float)) or K <= 0:
             raise ValueError('K must be positive.')
         if not isinstance(T, (int, float)) or T <= 0:
             raise ValueError('T must be positive.')
         if not isinstance(r, (int, float)):
             raise ValueError('r must be integer or float.')
-        if not isinstance(sigma, (int, float)) or sigma <= 0:
-            raise ValueError('sigma must be positive.')
         if not isinstance(N, int) or N <= 0:
             raise ValueError('N must be a positive integer or float.')
         if not isinstance(M, int) or M <= 0:
@@ -48,22 +44,67 @@ class BSDEOptionPricingEuropean:
             raise ValueError('delta must be an integer or float greater than zero')
         if not isinstance(confidence_level, float):
             raise ValueError('Lower confidence number msut be a float!')
+        if not isinstance(dims, int) or dims < 1:
+            raise ValueError('Dimensions must be an integer greater than 1!')
+
+        if dims == 1:
+            self._construct_one_dimensional_case(S0, mu, sigma, K, r, T, N, M, 
+                                                 confidence_level, samples, 
+                                                 option_payoff, domain, delta)
+        else:
+            self._construct_multi_dimensional_case(S0, mu, sigma, K, r, T, N, M, 
+                                                   confidence_level, samples, dims,
+                                                   option_payoff, domain, delta)
+
+    def _construct_one_dimensional_case(self, S0, mu, sigma, K, r, T, N, M, confidence_level, samples, option_payoff, domain, delta):
+        if not isinstance(S0, (int, float)) or S0 <= 0:
+            raise ValueError('S0 must be positive.')
+        if not isinstance(sigma, (int, float)) or sigma <= 0:
+            raise ValueError('sigma must be positive.')
+        if not isinstance(mu, (int, float)):
+            raise ValueError('Invalid mean value')
 
         self.S0 = S0
         self.K = K
         self.T = T
         self.r = r
-        self.mu = r if mu is None else mu
+        self.mu = mu        
         self.sigma = sigma
         self.N = N
         self.M = M
         self.option_payoff = self._get_opt_payoff(option_payoff)
-        self.domain = self._get_domain(domain) 
-        self.delta = delta if delta != None else 1
+        self.domain = self._get_domain(domain)
+        self.delta = delta if delta is not None else 1
         self.dt = T / N
         self.samples = samples
         self.confidence_level = confidence_level
-        self.lamb = (mu - r)/(sigma) if mu is not None else 0 
+        self.lamb = (self.mu - self.r) / self.sigma if self.mu is not None else 0
+        self._opt_style = 'european'
+
+    def _construct_multi_dimensional_case(self, S0, K, r, sigma, T, N, M, confidence_level, samples, dims, mu, option_payoff, domain, delta):
+        if mu is None:
+            raise ValueError('No mean is given!')
+        elif len(mu) != dims:
+            raise ValueError(f'The amount of mean values do not equal the amount of risky assets! Provided {dims} but only {len(mu)} mean values.')
+
+        if len(sigma) != dims:
+            raise ValueError('Amount of sigma values must equal dimensions')
+        self.S0 = S0
+        self.K = K
+        self.T = T
+        self.r = r
+        self.mu = np.full(dims, mu) 
+        self.sigma = np.array(sigma)
+        self.N = N
+        self.M = M
+        self.dims = dims
+        self.option_payoff = self._get_opt_payoff(option_payoff)
+        self.domain = self._get_domain(domain)
+        self.delta = delta if delta is not None else 1
+        self.dt = T / N
+        self.samples = samples
+        self.confidence_level = confidence_level
+        self.lamb = (self.mu - self.r) / self.sigma if self.mu is not None else 0
         self._opt_style = 'european'
 
     def _get_domain(self, domain):
@@ -363,9 +404,9 @@ class BSDEOptionPricingEuropean:
 
 
 class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
-    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, 
-                 mu, option_payoff, domain, delta): 
-        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, mu, 
+    def __init__(self, S0, mu, sigma, K, r, T, N, M, confidence_level, samples, 
+                 dims, option_payoff, domain, delta): 
+        super().__init__(S0, mu, sigma, K, r, T, N, M, confidence_level, samples, dims, 
                          option_payoff, domain, delta)
         self._opt_style = 'american'
 
@@ -400,8 +441,8 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
 
 
 class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
-    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, domain, delta, K2, R):
-        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, domain, delta) 
+    def __init__(self, S0, mu, sigma, K, r, T, N, M, confidence_level, samples, dims, option_payoff, domain, delta, K2, R):
+        super().__init__(S0, mu, sigma, K, r, T, N, M, confidence_level, samples, dims, option_payoff, domain, delta) 
         if K2 is None:
             raise ValueError('K2 must be specified for a spread option.')
         if K2 <= K:
@@ -450,8 +491,8 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
 
 
 class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropeanSpread):
-    def __init__(self, S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, domain, delta, K2, R):
-        super().__init__(S0, K, r, sigma, T, N, M, confidence_level, samples, mu, option_payoff, domain, delta, K2, R)
+    def __init__(self, S0, mu, sigma, K, r, T, N, M, confidence_level, samples, dims, option_payoff, domain, delta, K2, R):
+        super().__init__(S0, mu, sigma, K, r, T, N, M, confidence_level, samples, dims, option_payoff, domain, delta, K2, R)
         self._opt_style = 'americanspread'
 
     def _bsde_solver(self):
