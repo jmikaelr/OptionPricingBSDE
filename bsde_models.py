@@ -1,4 +1,6 @@
 import time
+import sys
+import itertools
 import yaml
 import inspect
 import pandas as pd
@@ -29,105 +31,135 @@ class BSDEOptionPricingEuropean:
         delta (float): The length of the hybercubes.
     """
     def __init__(self, S0, mu, sigma, K, r, T, N, M,  confidence_level = 0.025, 
-                 samples = 50, dims = 1, option_payoff="call", domain=None, delta= None):
+                 samples = 50, dims = 1, option_payoff="call", domain=[40,180], delta= 1, weights=None):
+        self._validation_check(S0, mu, sigma, K, r, T, N, M, 
+                         confidence_level, samples, dims, 
+                         option_payoff, domain, delta, weights) 
+        self.S0 = self._initialize_array(S0, dims) 
+        self.mu = self._initialize_array(mu, dims)
+        self.sigma = self._initialize_matrix(sigma, dims, dims) 
+        self.K = np.float32(K)
+        self.r = np.float32(r)
+        self.T = np.float32(T)
+        self.N = np.int32(N)
+        self.M = np.int32(M)
+        self.dt = np.float32(T/N)
+        self.confidence_level = np.float32(confidence_level)
+        self.samples = np.int32(samples)
+        self.dims = np.int32(dims)
+        self.option_payoff = option_payoff
+        self.domain = domain
+        self.delta = delta
+        self.k = 0
+        self.weights = np.ones(self.dims) / self.dims if weights == None else weights
+        self.sum_driver = self._build_sum_driver()
+
+    def _validation_check(self, S0, mu, sigma, K, r, T, N, M,
+                          confidence_level, samples, dims,
+                          option_payoff, domain, delta, weights):
+        if dims > 1:
+            if not isinstance(S0, np.ndarray):
+                raise ValueError('S0 must be a numpy array when dims > 1.')
+            if not isinstance(mu, np.ndarray):
+                raise ValueError('mu must be a numpy array when dims > 1.')
+            if not isinstance(sigma, np.ndarray):
+                raise ValueError('sigma must be a numpy array when dims > 1.')
+
+        else:
+            if not isinstance(S0, (int, float)):
+                raise ValueError('S0 must be an integer or float when dims = 1.')
+            if not isinstance(mu, (int, float)):
+                raise ValueError('mu must be an integer or float when dims = 1.')
+            if not isinstance(sigma, (int, float)):
+                raise ValueError('sigma must be an integer or float when dims = 1.')
         if not isinstance(K, (int, float)) or K <= 0:
             raise ValueError('K must be positive.')
         if not isinstance(T, (int, float)) or T <= 0:
             raise ValueError('T must be positive.')
         if not isinstance(r, (int, float)):
-            raise ValueError('r must be integer or float.')
+            raise ValueError('r must be an integer or float.')
         if not isinstance(N, int) or N <= 0:
-            raise ValueError('N must be a positive integer or float.')
+            raise ValueError('N must be a positive integer.')
         if not isinstance(M, int) or M <= 0:
             raise ValueError('M must be a positive integer.')
         if not isinstance(delta, (int, float)) or delta <= 0:
             raise ValueError('delta must be an integer or float greater than zero')
-        if not isinstance(confidence_level, float):
-            raise ValueError('Lower confidence number msut be a float!')
+        if not (isinstance(confidence_level, float) 
+            or confidence_level < 0 or confidence_level > 1):
+            raise ValueError('Lower confidence number must be a float within [0,1]!') 
+        if not isinstance(samples, int) or samples < 1:
+            raise ValueError('Samples must be an integer greater or equal to 1!') 
         if not isinstance(dims, int) or dims < 1:
             raise ValueError('Dimensions must be an integer greater than 1!')
+        if not isinstance(option_payoff, str):
+            raise ValueError('The option payoff must be a string! Either "call" or "put"')
+        if not isinstance(delta, (int, float)) or delta <= 0:
+            raise ValueError('Delta must be a positive number')
+        if not isinstance(domain, list) or not all(isinstance(item, tuple) and len(item) == 2 for item in domain):
+            raise ValueError('Domain must be a list of tuples, each representing the boundaries of a hypercube!')
+        if not len(domain) == dims:
+            raise ValueError('The domain must match the amount of dimensions')
+        return
+        if not isinstance(weights, list) or not all(isinstance(item, (int, float)) and 0 <= item <= 1 for item in weights):
+            raise ValueError('Weights must be a list of integers or floats between 0 and 1')
+        if not len(weights) == dims:
+            raise ValueError('Every stock must be given a weight!')
 
-        if dims == 1:
-            self._construct_one_dimensional_case(S0, mu, sigma, K, r, T, N, M, 
-                                                 confidence_level, samples, 
-                                                 option_payoff, domain, delta)
+
+    def _is_valid(self, param, check_positive=False):
+        if isinstance(param, (int, float)):
+            return not check_positive or param > 0
+        if isinstance(param, list) and all(isinstance(item, (int, float)) for item in param):
+            return not check_positive or all(item > 0 for item in param)
+        return False
+
+    def _initialize_array(self, values, d):
+        if d > 1:
+            if isinstance(values, np.ndarray):
+                if values.shape == (d,):
+                    return values
+                else:
+                    raise ValueError(f'Array must be of shape ({d},)')
+            else:
+                raise ValueError('Values must be a numpy array when dims > 1.')
         else:
-            self._construct_multi_dimensional_case(S0, mu, sigma, K, r, T, N, M, 
-                                                   confidence_level, samples, dims,
-                                                   option_payoff, domain, delta)
+            if isinstance(values, (int, float)):
+                return np.full(d, values)
+            elif isinstance(values, list):
+                return np.array(values)
+            else:
+                raise ValueError('Values must be an integer or float when dims = 1.')
 
-    def _construct_one_dimensional_case(self, S0, mu, sigma, K, r, T, N, M, confidence_level, samples, option_payoff, domain, delta):
-        if not isinstance(S0, (int, float)) or S0 <= 0:
-            raise ValueError('S0 must be positive.')
-        if not isinstance(sigma, (int, float)) or sigma <= 0:
-            raise ValueError('sigma must be positive.')
-        if not isinstance(mu, (int, float)):
-            raise ValueError('Invalid mean value')
-
-        self.S0 = S0
-        self.K = K
-        self.T = T
-        self.r = r
-        self.mu = mu        
-        self.sigma = sigma
-        self.N = N
-        self.M = M
-        self.option_payoff = self._get_opt_payoff(option_payoff)
-        self.domain = self._get_domain(domain)
-        self.delta = delta if delta is not None else 1
-        self.dt = T / N
-        self.samples = samples
-        self.confidence_level = confidence_level
-        self.lamb = (self.mu - self.r) / self.sigma if self.mu is not None else 0
-        self._opt_style = 'european'
-
-    def _construct_multi_dimensional_case(self, S0, K, r, sigma, T, N, M, confidence_level, samples, dims, mu, option_payoff, domain, delta):
-        if mu is None:
-            raise ValueError('No mean is given!')
-        elif len(mu) != dims:
-            raise ValueError(f'The amount of mean values do not equal the amount of risky assets! Provided {dims} but only {len(mu)} mean values.')
-
-        if len(sigma) != dims:
-            raise ValueError('Amount of sigma values must equal dimensions')
-        self.S0 = S0
-        self.K = K
-        self.T = T
-        self.r = r
-        self.mu = np.full(dims, mu) 
-        self.sigma = np.array(sigma)
-        self.N = N
-        self.M = M
-        self.dims = dims
-        self.option_payoff = self._get_opt_payoff(option_payoff)
-        self.domain = self._get_domain(domain)
-        self.delta = delta if delta is not None else 1
-        self.dt = T / N
-        self.samples = samples
-        self.confidence_level = confidence_level
-        self.lamb = (self.mu - self.r) / self.sigma if self.mu is not None else 0
-        self._opt_style = 'european'
-
-    def _get_domain(self, domain):
-        """ Retrieves the domain from user """
-        if not domain:
-            return domain
-        joined_domain = ''.join(str(domain))
-        split_domain = joined_domain.split(',')
-        domain = [int(num) for num in split_domain]
-        if domain[0] > domain[1]:
-            raise ValueError("Lower boundary higher than upper boundary!")
-        if domain[0] < 0 or domain[1] < 0:
-            raise ValueError("Boundaries must be positive!")
-        return domain
+    def _initialize_matrix(self, values, rows, cols):
+        if rows > 1 and cols > 1:
+            if isinstance(values, np.ndarray):
+                if values.shape == (rows, cols):
+                    return values
+                else:
+                    raise ValueError(f'Sigma must be of shape ({rows}, {cols})')
+            else:
+                raise ValueError('Sigma must be a numpy array when dims > 1.')
+        else:
+            if isinstance(values, (int, float)):
+                return np.full((rows, cols), values)
+            elif isinstance(values, list):
+                return np.array(values).reshape((rows, cols))
+            else:
+                raise ValueError('Sigma must be an integer or float when dims = 1.')
 
     @property
     def opt_style(self):
+        """ Not meant for user to change this, attribute given by class """
         return self._opt_style
 
     def _load_configs(self):
         """ Load configs for plotting and generating tables """
+        """ Loaded only when calling the plot method """
         with open('configs.yaml', 'r') as config_file:
             return yaml.safe_load(config_file)
+
+    def _build_sum_driver(self):
+        return np.sum((self.mu - self.r) / self.sigma.diagonal())
 
     def _get_opt_payoff(self, opt_payoff):
         """ Retrieves the option payoff from user input """
@@ -141,73 +173,106 @@ class BSDEOptionPricingEuropean:
             raise TypeError('Invalid option type! It should be call or put')
 
     def _payoff_func(self, S):
-        """ Payoff function or exercise value for given S """  
         if self.option_payoff == "call":
-            return np.maximum(S - self.K, 0) 
+            payoff = np.maximum(np.max(S, axis=0) - self.K, 0)
         elif self.option_payoff == "put":
-            return np.maximum(self.K - S, 0)
+            payoff = np.maximum(self.K - np.max(S, axis=0), 0)
         else:
-            raise ValueError(f"Invalid option type: {self.option_payoff}. Supported types are 'call' and 'put'.")
+            raise ValueError("Unsupported option payoff type.")
+        return np.mean(payoff)
 
-    def _generate_hypercube_basis(self, S):
-        num_cubes = int((self.domain[1] - self.domain[0]) / self.delta)
-        indicators = np.zeros((S.shape[0], num_cubes))
-        for i in range(num_cubes):
-            cube_min = self.domain[0] + i * self.delta
-            cube_max = cube_min + self.delta
-            indicator = (S >= cube_min) & (S < cube_max)
-            indicators[:, i] = indicator.flatten().astype(int)
-        return indicators
 
     def _generate_stock_paths(self):
-        """Simulates a Geometric Brownian Motion with initial start S0 """ 
-        dW = np.random.normal(0, np.sqrt(self.dt), (self.M, self.N))
-        S = np.empty((self.M, self.N+1))
-        S[:, 0] = self.S0  
-        log_S = np.cumsum((self.mu - 0.5 * self.sigma**2) * self.dt + self.sigma * dW, axis=1, out=S[:, 1:])
-        S[:, 1:] = self.S0 * np.exp(log_S)
-        if not self.domain:
-            self.domain = [np.min(S), np.max(S)]
-        return S, dW
+        """ S is d-dimensinoal forward component (Euler Scheme) """
+        """ With M simulations and N steps S will be a dxMxN matrix """
+        dw = np.random.normal(0, np.sqrt(self.dt), (self.dims, self.M, self.N-1))
+        S = np.empty((self.dims, self.M, self.N))
+        for dim in range(self.dims):
+            S[dim, :, 0] = self.S0[dim]
+            log_S = np.cumsum((self.mu[dim] - 0.5 * self.sigma[dim][dim]**2) * self.dt + self.sigma[dim][dim] * dw[dim, :, :], axis=1) 
+            S[dim, :, 1:] = self.S0[dim] * np.exp(log_S)
+        
+        return S, dw
 
-    def _driver(self, Y_plus, Z):
-        """ Returns the driver in the BSDE with same interest for lending and borrowing """
-        return -(Z*self.lamb + self.r*Y_plus)
+    def _generate_hypercube_basis(self, S):
+        H = 70
+        num_cubes_per_dim = int(2 * H // self.delta)
+        num_basis_per_cube = (self.k + 1) ** self.dims
 
-    def _generate_Z(self, p_li, A, Y_plus, dW):
+        M = S.shape[1]
+        dim_phi = num_cubes_per_dim ** self.dims * num_basis_per_cube
+        indicators = np.zeros((M, dim_phi))
+
+        # Generate cube ranges for each dimension
+        cube_ranges = [range(int((self.S0[dim] - H) // self.delta), int((self.S0[dim] + H) // self.delta)) for dim in range(self.dims)]
+        cube_indices = list(itertools.product(*cube_ranges))
+
+        for i, cube_index in enumerate(cube_indices):
+            # Calculate cube boundaries
+            cube_min = np.array([cube_index[dim] * self.delta for dim in range(self.dims)])
+            cube_max = cube_min + self.delta
+            
+            # Calculate indicator using broadcasting
+            indicator = np.all((S >= cube_min[:, np.newaxis]) & (S < cube_max[:, np.newaxis]), axis=0)
+
+            if not np.any(indicator):
+                continue
+
+            # Compute polynomial values for the current hypercube
+            for poly_idx, poly_degrees in enumerate(itertools.product(range(self.k + 1), repeat=self.dims)):
+                basis_index = i * num_basis_per_cube + poly_idx
+                polynomial_values = np.prod([S[dim, :] ** poly_degrees[dim] for dim in range(self.dims)], axis=0)
+                indicators[:, basis_index] = indicator * polynomial_values
+        #indices_with_ones = np.argwhere(indicators == 1)
+        #print("Indices where indicators are 1:\n", indices_with_ones)
+
+        return indicators
+
+    def _generate_Z(self, p_li, A, Y_plus, dw):
         """ Generates the conditional expectation for Z at time t_i """
-        b_z = p_li.T @ (Y_plus * dW)
+        b_z =  p_li.T @ (Y_plus * dw.T)
         alpha_z, _, _, _ = np.linalg.lstsq(A, b_z, rcond=None)
         return (p_li @ alpha_z) / self.dt
 
+        
     def _generate_Y(self, p_li, A, Y_plus, Z):
         """ Generates the conditional expectation for Y at time t_i """
-        b_y = p_li.T @ (Y_plus + self.dt * self._driver(Y_plus, Z))
-        alpha_y, _, _, _ = np.linalg.lstsq(A, b_y, rcond=None)
-        return (p_li @ alpha_y) 
+        opr = (Y_plus + self.dt * self._driver(Y_plus, Z))
+        b_y = p_li.T @ opr
+        alpha_y, _, _, _ = np.linalg.lstsq(A, b_y, rcond=None) 
+        return (p_li @ alpha_y)
+
+    def _driver(self, Y_plus, Z):
+        """ Returns the driver in the BSDE with same interest for lending and borrowing """
+        return -(Z * self.sum_driver + self.r * Y_plus)
+
 
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
         Y0_samples = np.zeros(self.samples)
-        Z0_samples = np.zeros(self.samples)
+        Z0_samples = np.zeros((self.dims, self.samples))
+
+        epsilon = 1e-6
 
         for k in range(self.samples):
-            S, dW = self._generate_stock_paths()
-            Y = np.zeros((self.M, self.N + 1))
-            Z = np.zeros((self.M, self.N))
-
-            Y[:, -1] = self._payoff_func(S[:, -1])
-
+            S, dw = self._generate_stock_paths()
+            Y_plus = self._payoff_func(S[:, :, -1])
+            Y = 0
+            Z = np.zeros(self.dims)
             for i in range(self.N - 1, -1, -1):
-                p_li = self._generate_hypercube_basis(S[:, [i]])
+                p_li = self._generate_hypercube_basis(S[:, :, i])
                 A = p_li.T @ p_li
-                Z[:, i] = self._generate_Z(p_li, A, Y[:, i+1], dW[:, i])
-                Y[:, i] = self._generate_Y(p_li, A, Y[:, i+1], Z[:, i])
-
-            Y0_samples[k] = np.mean(Y[:, 0])
-            Z0_samples[k] = np.mean(Z[:, 0])
+                A_reg = A + epsilon * np.eye(A.shape[0])
+                Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i - 1])
+                Y = self._generate_Y(p_li, A, Y_plus, Z)
+                Y_plus = np.mean(Y)
+             
+            Y0_samples[k] = Y_plus
+            Z0_samples[:, k] = np.mean(Z, axis=0)
 
         return Y0_samples, Z0_samples
+
+        
 
     def _confidence_interval(self, sample):
         """ Calculates the confidence interval with confidence_level """ 

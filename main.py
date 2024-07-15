@@ -19,7 +19,7 @@ def main():
     parser.add_argument("--M", type=int, default=32768, help="Number of Monte Carlo simulations")
     parser.add_argument("--L", type=float, default=0.025, help="confidence alpha")
     parser.add_argument("--delta", type=float, default=1, help="Length of hybercubes")
-    parser.add_argument("--domain", type=str, default=None, help="The domain which the hybercubes cover")
+    parser.add_argument("--domain", type=str, default="[(40,180)]", help="The domain which the hybercubes cover")
     parser.add_argument("--samples", type=int, default=50, help="Number of samples of solved BSDEs prices")
     parser.add_argument("--opt_payoff", type=str, choices=['call', 'put'], default='call', help="Option payoff (either 'call' or 'put')")
     parser.add_argument("--opt_style", type=str, choices=['european', 'american', 'europeanspread', 'americanspread'], default='european', help="Option style")
@@ -28,11 +28,16 @@ def main():
     parser.add_argument("--plot_type", type=str, choices = ['N', 'M', 'deltas', 'samples'], default = None, help="What kind of plot, default is no plot.")
     parser.add_argument("--plot_values", type=str, help="Comma-separated list of values for the selected plot type (e.g., 10,20,30).")
     args = parser.parse_args()
+    args.domain = parse_domain(args.domain) 
     if args.plot_type == 'deltas':
         plot_values = [float(x) for x in args.plot_values.split(',')] if args.plot_values else None
     else:
         plot_values = [int(x) for x in args.plot_values.split(',')] if args.plot_values else None
     price = None
+    if args.dims != 1:
+        args.S = np.full(args.dims, args.S)
+        args.mu = np.full(args.dims, args.mu)
+        args.sigma = np.full((args.dims,args.dims), args.sigma)
     if args.opt_style in ['european', 'americanspread', 'europeanspread', 'american']:
         if args.opt_style == 'european':
             option_pricing_obj = BSDEOptionPricingEuropean(args.S, args.mu, args.sigma, args.K,
@@ -40,7 +45,10 @@ def main():
                                                            args.L, args.samples, args.dims, 
                                                            args.opt_payoff, args.domain, 
                                                            args.delta)
-            price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
+            if args.dims != 1:
+                price = black_scholes(args.S[0], args.K, args.T, args.r, args.sigma[0][0], args.opt_payoff)
+            else:
+                price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
         elif args.opt_style == 'american':
             option_pricing_obj = BSDEOptionPricingAmerican(args.S, args.mu, args.sigma, args.K,
                                                            args.r, args.T, args.N, args.M, 
@@ -83,8 +91,6 @@ def main():
                 print(f"{args.opt_style.capitalize()} {args.opt_payoff} option price: {price:.4f}")
     else:
         raise ValueError('Invalid option: {args.opt_style}')
-
-   
 def black_scholes(S, K, T, r, sigma, opt_payoff):
     """ Calculates an european option using the analytical blach-scholes
     formula """
@@ -98,6 +104,10 @@ def black_scholes(S, K, T, r, sigma, opt_payoff):
     else:
         raise ValueError(f'Invalid payoff {opt_payoff}, it must be either "call" or "put"')
 
+def parse_domain(domain_str):
+    return eval(domain_str)
+
 if __name__ == '__main__':
     main()
+
 
