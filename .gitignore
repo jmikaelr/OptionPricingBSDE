@@ -4,3 +4,4 @@ tables/
 run.sh
 .python-version
 __pycache__/
+test.py
