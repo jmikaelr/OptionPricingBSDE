@@ -4,8 +4,11 @@ import yaml
 import inspect
 import pandas as pd
 import os
+import gc
 import numpy as np
 from scipy.stats import norm
+import scipy.sparse as sp
+import scipy.sparse.linalg as splinalg
 import matplotlib.pyplot as plt
 
 class BSDEOptionPricingEuropean:
@@ -149,7 +152,7 @@ class BSDEOptionPricingEuropean:
         num_basis_per_cube = (self.k + 1) ** self.dims
         M = S.shape[1]
         dim_phi = num_cubes_per_dim ** self.dims * num_basis_per_cube
-        indicators = np.zeros((M, dim_phi))
+        indicators = sp.lil_matrix((M, dim_phi))
         cube_ranges = [range(int((self.S0[dim] - H) // self.delta), int((self.S0[dim] + H) // self.delta)) for dim in range(self.dims)]
         cube_indices = list(itertools.product(*cube_ranges))
 
@@ -163,23 +166,28 @@ class BSDEOptionPricingEuropean:
                 basis_index = i * num_basis_per_cube + poly_idx
                 polynomial_values = np.prod([S[dim, :] ** poly_degrees[dim] for dim in range(self.dims)], axis=0)
                 indicators[:, basis_index] = indicator * polynomial_values
-        return indicators
+        return indicators.tocsr()
 
     def _generate_Z(self, p_li, A, Y_plus, dw):
         """ Generates the conditional expectation for Z at time t_i """
         b_z =  p_li.T @ (Y_plus * dw.T)
-        alpha_z, _, _, _ = np.linalg.lstsq(A, b_z, rcond=None)
-        return (p_li @ alpha_z) / self.dt
+        Z = np.zeros((p_li.shape[0], self.dims))
+        for d in range(self.dims):
+            alpha_z = splinalg.lsqr(A, b_z[:, d].toarray() if sp.issparse(b_z[:, d]) else b_z[:, d])[0]
+            Z[:, d] = (p_li @ alpha_z) / self.dt
+        return Z
        
     def _generate_Y(self, p_li, A, Y_plus, Z):
         """ Generates the conditional expectation for Y at time t_i """
         opr = (Y_plus + self.dt * self._driver(Y_plus, Z))
         b_y = p_li.T @ opr
-        alpha_y, _, _, _ = np.linalg.lstsq(A, b_y, rcond=None) 
-        return (p_li @ alpha_y)
+        alpha_y = np.expand_dims(splinalg.lsqr(A, b_y)[0], axis = 1)
+        return (p_li @ alpha_y) 
 
     def _driver(self, Y_plus, Z):
         """ Returns the driver in the BSDE with same interest for lending and borrowing """
+        sum_term = np.sum((self.lamb) / self.sigma * Z, axis=1, keepdims=True)
+        return -(sum_term + self.r * Y_plus)
         return -(Z * self.lamb + self.r * Y_plus)
 
 
@@ -190,10 +198,12 @@ class BSDEOptionPricingEuropean:
         Z0_samples = np.zeros((self.dims, self.samples))
 
         for k in range(self.samples):
+            sample_time = time.time()
             S, dw = self._generate_stock_paths()
             if ((np.max(S) > (np.max(self.S0) + self.H)) or 
                 (np.min(S) < (np.min(self.S0) - self.H))):
                 domain_out_of_range = True
+            print(np.max(S))
             Y_plus = self._payoff_func(S[:, :, -1])
             Y = np.zeros(self.M)
             Z = np.zeros((self.M, self.dims))
@@ -203,10 +213,13 @@ class BSDEOptionPricingEuropean:
                 Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
                 Y = self._generate_Y(p_li, A, Y_plus, Z)
                 Y_plus = Y
+                del p_li, A
+                gc.collect()
              
             Y0_samples[k] = np.mean(Y_plus)
             Z0_samples[:, k] = np.mean(Z, axis=0)
-            print(f"Done with sample: {k+1}")
+            sample_finish_time = time.time() - sample_time
+            print(f"Done with sample: {k+1} in {sample_finish_time} seconds")
         if domain_out_of_range:
             print("Domain possibly out of range, consider increasing H!")
         return Y0_samples, Z0_samples
@@ -434,6 +447,8 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
                 Y = self._generate_Y(p_li, A, Y_plus, Z)
                 exercise_values = self._payoff_func(S[:, :, i])
                 Y_plus = np.maximum(Y, exercise_values)
+                del p_li, A
+                gc.collect()
              
             Y0_samples[k] = np.mean(Y_plus)
             Z0_samples[:, k] = np.mean(Z, axis=0)
