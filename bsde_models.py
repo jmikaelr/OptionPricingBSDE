@@ -1,17 +1,13 @@
 import time
 import itertools
 import yaml
-import inspect
 import pandas as pd
 import os
-import gc
 import numpy as np
 from scipy.stats import norm
 import scipy.sparse as sp
 import scipy.sparse.linalg as splinalg
 import matplotlib.pyplot as plt
-
-np.random.seed(42)
 
 class BSDEOptionPricingEuropean:
     def __init__(self, S0, mu, sigma, correlation, K, r, T, N, M,  confidence_level = 0.025, 
@@ -19,24 +15,30 @@ class BSDEOptionPricingEuropean:
         self._validation_check(S0, mu, sigma, K, r, T, N, M, 
                          confidence_level, samples, dims, 
                          option_payoff, H, delta) 
-        self.S0 = np.float32(S0) 
-        self.mu = np.float32(mu) 
-        self.sigma = np.float32(sigma)
-        self.K = np.float32(K)
-        self.r = np.float32(r)
-        self.T = np.float32(T)
-        self.N = np.int32(N)
-        self.M = np.int32(M)
-        self.dt = np.float32(T/N)
+        self.S0 = np.float64(S0) 
+        self.mu = np.float64(mu) 
+        self.sigma = np.float64(sigma)
+        self.K = np.float16(K)
+        self.r = np.float64(r)
+        self.T = np.float16(T)
+        self.N = np.uint32(N)
+        self.M = np.uint32(M)
+        self.dt = np.float64(T/N)
         self.confidence_level = np.float32(confidence_level)
-        self.samples = np.int32(samples)
-        self.dims = np.int32(dims)
+        self.samples = np.uint16(samples)
+        self.dims = np.uint8(dims)
         self.option_payoff = option_payoff
-        self.H = H
-        self.delta = delta
-        self.k = k
-        self.lamb = (mu - r)/sigma
-        self.correlation = (np.full((1, 1), 1) if self.dims == 1 
+        self.H = np.uint8(H)
+        self.delta = np.uint8(delta)
+        self.num_cubes_per_dim = int(2 * H // delta)
+        self.num_basis_per_cube = (k + 1) ** dims
+        self.dim_phi = self.num_cubes_per_dim ** dims * self.num_basis_per_cube
+        self.cube_ranges = ([range(int((S0 - H) // delta), 
+                                   int((S0 + H) // delta)) for _ in range(dims)])
+        self.cube_indices = list(itertools.product(*self.cube_ranges))
+        self.k = np.uint8(k)
+        self.lamb = np.float64((mu - r)/sigma)
+        self.correlation = np.float32(np.full((1, 1), 1) if self.dims == 1 
             else self._construct_correlation_matrix(correlation))
         self._opt_style = 'european'
 
@@ -137,53 +139,73 @@ class BSDEOptionPricingEuropean:
 
     def _generate_hypercube_basis(self, S):
         H = self.H 
-        num_cubes_per_dim = int(2 * H // self.delta)
-        num_basis_per_cube = (self.k + 1) ** self.dims
-        M = S.shape[1]
-        dim_phi = num_cubes_per_dim ** self.dims * num_basis_per_cube
-        indicators = sp.lil_matrix((M, dim_phi))
-        cube_ranges = [range(int((self.S0 - H) // self.delta), int((self.S0 + H) // self.delta)) for dim in range(self.dims)]
-        cube_indices = list(itertools.product(*cube_ranges))
+        k = self.k
+        delta = self.delta
+        dims = self.dims
+        dim_phi = self.dim_phi
+        cube_indices = self.cube_indices
+        num_basis_per_cube = self.num_basis_per_cube
+        M, N = S.shape[1], S.shape[2]  
+        indicators_list = []
 
-        for i, cube_index in enumerate(cube_indices):
-            cube_min = np.maximum(np.array([cube_index[dim] * self.delta for dim in range(self.dims)]),0)
-            cube_max = cube_min + self.delta
-            indicator = np.all((S >= cube_min[:, np.newaxis]) & (S < cube_max[:, np.newaxis]), axis=0)
-            if not np.any(indicator):
-                continue
-            for poly_idx, poly_degrees in enumerate(itertools.product(range(self.k + 1), repeat=self.dims)):
-                basis_index = i * num_basis_per_cube + poly_idx
-                polynomial_values = np.prod([S[dim, :] ** poly_degrees[dim] for dim in range(self.dims)], axis=0)
-                indicators[:, basis_index] = indicator * polynomial_values
-        return indicators.tocsr()
+        cube_min_vals = [np.maximum(np.array([cube_index[dim] * delta for dim in range(dims)]), 
+                                    0) for cube_index in cube_indices]
+        cube_max_vals = [cube_min + delta for cube_min in cube_min_vals]
+
+        poly_degrees_list = np.array(list(itertools.product(range(k + 1), repeat=dims)))
+
+        for t in range(N):
+            indicators = np.zeros((M, dim_phi))
+            for i, (cube_min, cube_max) in enumerate(zip(cube_min_vals, cube_max_vals)):
+                indicator = (np.logical_and.reduce((S[:, :, t] >= cube_min[:, np.newaxis]) & 
+                        (S[:, :, t] < cube_max[:, np.newaxis]), axis=0))
+                if not np.any(indicator):
+                    continue
+
+                poly_values = np.ones((dims, M))
+                for dim in range(dims):
+                    for deg in range(k + 1):
+                        poly_values[dim] *= np.where(indicator, S[dim, :, t] ** deg, 1)
+
+                for poly_idx, poly_degrees in enumerate(poly_degrees_list):
+                    basis_index = i * num_basis_per_cube + poly_idx
+                    polynomial_values = (np.prod([S[dim, :, t] ** poly_degrees[dim] 
+                        for dim in range(dims)], axis=0))
+                    indicators[:, basis_index] = indicator * polynomial_values
+            indicators_list.append(sp.csr_matrix(indicators))
+        
+        return indicators_list
 
     def _generate_Z(self, p_li, A, Y_plus, dw):
         """ Generates the conditional expectation for Z at time t_i """
         b_z =  p_li.T @ (Y_plus * dw.T)
         Z = np.zeros((p_li.shape[0], self.dims))
         for d in range(self.dims):
-            alpha_z = splinalg.lsqr(A, b_z[:, d].toarray() if sp.issparse(b_z[:, d]) else b_z[:, d])[0]
-            Z[:, d] = (p_li @ alpha_z) / self.dt
-        return Z
+            alpha_z = splinalg.lsqr(A, b_z[:, d].toarray() if sp.issparse(b_z[:, d]) else 
+                                    b_z[:, d], atol=0,btol=0,conlim=0)[0]
+            Z[:, d] = (p_li @ alpha_z)
+        return Z / self.dt
        
     def _generate_Y(self, p_li, A, Y_plus, Z):
         """ Generates the conditional expectation for Y at time t_i """
         opr = (Y_plus + self.dt * self._driver(Y_plus, Z))
         b_y = p_li.T @ opr
-        alpha_y = np.expand_dims(splinalg.lsqr(A, b_y)[0], axis = 1)
+        alpha_y = np.expand_dims(splinalg.lsqr(A, b_y, atol=0,btol=0,conlim=0)[0], axis = 1)
         return (p_li @ alpha_y) 
 
     def _driver(self, Y_plus, Z):
         """ Returns the driver in the BSDE with same interest for lending and borrowing """
-        sum_term = np.sum((self.lamb) / self.sigma * Z, axis=1, keepdims=True)
-        return -(sum_term + self.r * Y_plus)
+        sum_term = 0
+        for dim in range(self.dims):
+            ((self.mu - self.r)/self.sigma) * Z[:, dim]
+        return -(self.r * Y_plus + sum_term) 
 
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
         domain_out_of_range = False
-        Y0_samples = np.zeros(self.samples)
+        Y0_samples = np.zeros(self.samples) 
         Z0_samples = np.zeros((self.dims, self.samples))
-
+        
         for k in range(self.samples):
             sample_time = time.time()
             S, dw = self._generate_stock_paths()
@@ -193,19 +215,20 @@ class BSDEOptionPricingEuropean:
             Y_plus = self._payoff_func(S[:, :, -1])
             Y = np.zeros(self.M)
             Z = np.zeros((self.M, self.dims))
+            p_li_list = self._generate_hypercube_basis(S)
             for i in range(self.N - 1, -1, -1):
-                p_li = self._generate_hypercube_basis(S[:, :, i])
+                p_li = p_li_list[i] 
                 A = p_li.T @ p_li
                 Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
                 Y = self._generate_Y(p_li, A, Y_plus, Z)
                 Y_plus = Y
                 del p_li, A
-                gc.collect()
              
             Y0_samples[k] = np.mean(Y_plus)
             Z0_samples[:, k] = np.mean(Z, axis=0)
             sample_finish_time = time.time() - sample_time
             print(f"Done with sample: {k+1} in {sample_finish_time} seconds")
+            del p_li_list, S, dw, Z, Y, Y_plus
         if domain_out_of_range:
             print("Domain possibly out of range, consider increasing H!")
         return Y0_samples, Z0_samples
@@ -235,7 +258,8 @@ class BSDEOptionPricingEuropean:
             Z.append(est_Z0)
             Y_errors.append(std_Y0)
             Z_errors.append(std_Z0)
-            rows.append([N_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, CI_Z[0], CI_Z[1]])
+            rows.append([N_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
+                         CI_Z[0], CI_Z[1]])
             print(f'Done with N: {N_val}.')
 
         self._generate_plot(N_values, Y, Y_errors, function_name, bs_price, nofig)
@@ -256,7 +280,8 @@ class BSDEOptionPricingEuropean:
             Z.append(est_Z0)
             Y_errors.append(std_Y0)
             Z_errors.append(std_Z0)
-            rows.append([M_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, CI_Z[0], CI_Z[1]])
+            rows.append([M_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
+                         CI_Z[0], CI_Z[1]])
             print(f'Done with M_val: {M_val}.')
 
         self._generate_plot(M_values, Y, Y_errors, function_name, bs_price, nofig)
@@ -277,7 +302,8 @@ class BSDEOptionPricingEuropean:
             Z.append(est_Z0)
             Y_errors.append(std_Y0)
             Z_errors.append(std_Z0)
-            rows.append([delta, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, CI_Z[0], CI_Z[1]])
+            rows.append([delta, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
+                         CI_Z[0], CI_Z[1]])
             print(f'Done with delta: {delta}.')
 
         self._generate_plot(deltas, Y, Y_errors, function_name, bs_price, nofig)
@@ -298,7 +324,8 @@ class BSDEOptionPricingEuropean:
             Z.append(est_Z0)
             Y_errors.append(std_Y0)
             Z_errors.append(std_Z0)
-            rows.append([sample, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, CI_Z[0], CI_Z[1]])
+            rows.append([sample, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
+                         CI_Z[0], CI_Z[1]])
             print(f'Done with sample: {sample}.')
 
         self._generate_plot(samples, Y, Y_errors, function_name, bs_price, nofig)
@@ -317,11 +344,13 @@ class BSDEOptionPricingEuropean:
 
         plt.xlabel(plot_config.get('xlabel'))
         plt.ylabel(plot_config.get('ylabel'))
-        plt.title(plot_config.get('title').format(opt_style=self._opt_style.capitalize(), option_payoff=self.option_payoff.capitalize()))
+        plt.title(plot_config.get('title').format(opt_style=self._opt_style.capitalize(), 
+                                                  option_payoff=self.option_payoff.capitalize()))
         plt.legend(loc=plot_config.get('legend_location', 'best'))
         plt.grid(plot_config.get('grid', True))
 
-        plot_directory = os.path.join(configs['general_settings']['plot_directory'], function_name)
+        plot_directory = os.path.join(configs['general_settings']['plot_directory'], 
+                                      function_name)
         os.makedirs(plot_directory, exist_ok=True)
 
         plot_name = plot_config['plot_name_template'].format(
@@ -343,13 +372,15 @@ class BSDEOptionPricingEuropean:
     def _generate_table(self, rows, function_name):
         """ Generates the table with the configs in the yaml file """
         configs = self._load_configs()
-        table_directory = os.path.join(configs['general_settings']['table_directory'], function_name)
+        table_directory = os.path.join(configs['general_settings']['table_directory'], 
+                                       function_name)
         os.makedirs(table_directory, exist_ok=True)
 
         first_elements = [row[0] for row in rows]
         
         columns = (
-            [function_name.split('_')[-1].capitalize(), 'Estimated Price Y0', 'Std. Deviation Y0',
+            [function_name.split('_')[-1].capitalize(), 
+             'Estimated Price Y0', 'Std. Deviation Y0',
             'CI Lower Bound Y0', 'CI Upper Bound Y0','Estimated Volatility Z0', 
             'Std. Deviation Z0', 'CI Lower Bound Z0', 'CI Upper Bound Z0']
         )
@@ -426,20 +457,21 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
             Y_plus = self._payoff_func(S[:, :, -1])
             Y = np.zeros(self.M)
             Z = np.zeros((self.M, self.dims))
+            p_li_list = self._generate_hypercube_basis(S)
             for i in range(self.N - 1, -1, -1):
-                p_li = self._generate_hypercube_basis(S[:, :, i])
+                p_li = p_li_list[i] 
                 A = p_li.T @ p_li
                 Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
                 Y = self._generate_Y(p_li, A, Y_plus, Z)
                 exercise_values = self._payoff_func(S[:, :, i])
                 Y_plus = np.maximum(Y, exercise_values)
                 del p_li, A
-                gc.collect()
-
+             
             Y0_samples[k] = np.mean(Y_plus)
             Z0_samples[:, k] = np.mean(Z, axis=0)
             sample_finish_time = time.time() - sample_time
             print(f"Done with sample: {k+1} in {sample_finish_time} seconds")
+            del p_li_list, S, dw, Z, Y, Y_plus
         if domain_out_of_range:
             print("Domain possibly out of range, consider increasing H!")
         return Y0_samples, Z0_samples
@@ -448,10 +480,11 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
         base_repr = super().__repr__()
         return base_repr[:-1] + f" opt_style='{self._opt_style}'\n)"
 
-
 class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
-    def __init__(self, S0, mu, sigma, correlation, K, r, T, N, M, confidence_level, samples, dims, option_payoff, domain, delta, k, K2, R):
-        super().__init__(S0, mu, sigma, correlation, K, r, T, N, M, confidence_level, samples, dims, option_payoff, domain, delta, k) 
+    def __init__(self, S0, mu, sigma, correlation, K, r, T, N, M, 
+                 confidence_level, samples, dims, option_payoff, domain, delta, k, K2, R):
+        super().__init__(S0, mu, sigma, correlation, K, r, T, N, M, 
+                         confidence_level, samples, dims, option_payoff, domain, delta, k) 
         if K2 is None:
             raise ValueError('K2 must be specified for a spread option.')
         if K2 <= K:
@@ -486,12 +519,13 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
         result = - term1 - term2 + term3
         return result
 
+
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
         domain_out_of_range = False
-        Y0_samples = np.zeros(self.samples)
+        Y0_samples = np.zeros(self.samples) 
         Z0_samples = np.zeros((self.dims, self.samples))
-
+        
         for k in range(self.samples):
             sample_time = time.time()
             S, dw = self._generate_stock_paths()
@@ -501,28 +535,33 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
             Y_plus = self._payoff_func(S[:, :, -1])
             Y = np.zeros(self.M)
             Z = np.zeros((self.M, self.dims))
+            p_li_list = self._generate_hypercube_basis(S)
             for i in range(self.N - 1, -1, -1):
-                p_li = self._generate_hypercube_basis(S[:, :, i])
+                p_li = p_li_list[i] 
                 A = p_li.T @ p_li
                 Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
                 Y = self._generate_Y(p_li, A, Y_plus, Z)
                 Y_plus = Y
+                del p_li, A
              
             Y0_samples[k] = np.mean(Y_plus)
             Z0_samples[:, k] = np.mean(Z, axis=0)
             sample_finish_time = time.time() - sample_time
             print(f"Done with sample: {k+1} in {sample_finish_time} seconds")
+            del p_li_list, S, dw, Z, Y, Y_plus
         if domain_out_of_range:
             print("Domain possibly out of range, consider increasing H!")
-        return Y0_samples, Z0_samples
+        return Y0_samples, Z0_samples   
 
     def __repr__(self):
         base_repr = super().__repr__()
         return base_repr[:-1] + f"\n  opt_style='{self._opt_style}'\n  K2='{self.K2}'\n  R='{self.R}'\n)"
 
 class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropeanSpread):
-    def __init__(self, S0, mu, sigma, correlation, K, r, T, N, M, confidence_level, samples, dims, option_payoff, domain, delta, k, K2, R):
-        super().__init__(S0, mu, sigma, correlation, K, r, T, N, M, confidence_level, samples, dims, option_payoff, domain, delta, k, K2, R)
+    def __init__(self, S0, mu, sigma, correlation, K, r, T, N, M, 
+                 confidence_level, samples, dims, option_payoff, domain, delta, k, K2, R):
+        super().__init__(S0, mu, sigma, correlation, K, r, T, N, M, 
+                         confidence_level, samples, dims, option_payoff, domain, delta, k, K2, R)
         self._opt_style = 'americanspread'
 
     def _bsde_solver(self):
@@ -540,17 +579,27 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropeanSpread):
             Y_plus = self._payoff_func(S[:, :, -1])
             Y = np.zeros(self.M)
             Z = np.zeros((self.M, self.dims))
+            p_li_list = self._generate_hypercube_basis(S)
             for i in range(self.N - 1, -1, -1):
-                p_li = self._generate_hypercube_basis(S[:, :, i])
+                p_li = p_li_list[i] 
                 A = p_li.T @ p_li
                 Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
                 Y = self._generate_Y(p_li, A, Y_plus, Z)
-                Y_plus = np.maximum(Y, self._payoff_func(S[:, :, i]))
+                exercise_values = self._payoff_func(S[:, :, i])
+                Y_plus = np.maximum(Y, exercise_values)
+                del p_li, A
              
             Y0_samples[k] = np.mean(Y_plus)
             Z0_samples[:, k] = np.mean(Z, axis=0)
             sample_finish_time = time.time() - sample_time
             print(f"Done with sample: {k+1} in {sample_finish_time} seconds")
+            del p_li_list, S, dw, Z, Y, Y_plus
         if domain_out_of_range:
             print("Domain possibly out of range, consider increasing H!")
         return Y0_samples, Z0_samples
+
+    def __repr__(self):
+        base_repr = super().__repr__()
+        return base_repr[:-1] + f"\n  opt_style='{self._opt_style}'\n  K2='{self.K2}'\n  R='{self.R}'\n)"
+
+

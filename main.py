@@ -1,9 +1,8 @@
 from bsde_models import *
+from pyinstrument import Profiler
 import numpy as np
 from scipy.stats import norm
 import argparse
-import cProfile
-import pstats
 import io
 
 
@@ -14,7 +13,7 @@ def main():
     parser.add_argument("--K", type=float, default=95.0, help="Strike price")
     parser.add_argument("--K2", type=float, default=105, help="Second strike price")
     parser.add_argument("--r", type=float, default=0.01, help="Rate")
-    parser.add_argument("--R", type=float, default=0.01, help="Second rate")
+    parser.add_argument("--R", type=float, default=0.06, help="Second rate")
     parser.add_argument("--dims", type=int, default=1, help="Number of risky assets (stocks), default is one.")
     parser.add_argument("--mu", type=float, default=0.01, help="Drift term on stock")
     parser.add_argument("--sigma", type=float, default=0.2, help="Volatility (sigma)")
@@ -89,7 +88,6 @@ def main():
                 option_pricing_obj.plot_and_show_table_by_samples(plot_values, args.nofig, price)
         else:  
             option_pricing_obj.solve()  
-            print(price)
             if price:
                 print(f"{args.opt_style.capitalize()} {args.opt_payoff} option price: {price}")
     else:
@@ -108,28 +106,6 @@ def black_scholes(S, K, T, r, sigma, opt_payoff):
     else:
         raise ValueError(f'Invalid payoff {opt_payoff}, it must be either "call" or "put"')
 
-
-#def multi_dimensional_black_scholes(S, K, T, r, sigma, opt_payoff):
-#    d = len(S)
-#    ck = np.full(d, 1/d)
-#    
-#    b_tilde_squared = np.sum((sigma * ck)**2)
-#    delta_tilde = np.sum(ck * ((b_tilde_squared / 2))) - (b_tilde_squared / 2)
-#    
-#    d1_tilde = (np.log(np.prod((S / K)**ck)) + (r - delta_tilde + (b_tilde_squared / 2)) * (T)) / (np.sqrt(b_tilde_squared) * np.sqrt(T))
-#    d2_tilde = d1_tilde - np.sqrt(b_tilde_squared) * np.sqrt(T)
-#    
-#    if opt_payoff == 'call':
-#        Y_t = np.exp(-delta_tilde * (T)) * np.prod(S**ck) * norm.cdf(d1_tilde) - np.exp(-r * (T)) * K * norm.cdf(d2_tilde)
-#    elif opt_payoff == 'put':
-#        Y_t = np.exp(-r * (T)) * K * norm.cdf(-d2_tilde) - np.exp(-delta_tilde * (T)) * np.prod(S**ck) * norm.cdf(-d1_tilde)
-#    else:
-#        raise ValueError(f'Invalid payoff {opt_payoff}, it must be either "call" or "put"')
-#    
-#    Zk_t = np.array([ck_i * np.exp(-delta_tilde * (T)) * np.prod(S**ck) * norm.cdf(d1_tilde) * sigma_i for ck_i, sigma_i in zip(ck, sigma)])
-#    
-#    return Y_t, Zk_t
-
 def profile_solve():
     pr = cProfile.Profile()
     pr.enable()
@@ -143,11 +119,10 @@ def profile_solve():
 
 
 if __name__ == '__main__':
-#    option_pricing_obj = BSDEOptionPricingEuropean(
-#        S0=100, mu=0.05, sigma=0.2, correlation=0.5, K=100, r=0.05, T=1,
-#        N=5, M=10000, dims=1, option_payoff="call", samples = 1
-#    )
-#    profile_solve()
+    #profiler = Profiler()
+    #profiler.start()
     main()
+    #profiler.stop()
+    #print(profiler.output_text(unicode=True, color=True))
 
 
