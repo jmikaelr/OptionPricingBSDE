@@ -11,34 +11,17 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as splinalg
 import matplotlib.pyplot as plt
 
-class BSDEOptionPricingEuropean:
-    """ 
-    Constructs an instance to price a vanilla European option.
-    Supports both put and call options with Laguerre or hybercube regression bases.
+np.random.seed(42)
 
-    Attributes:
-        S0 (float): Initial stock price.
-        K (float): Strike price of the option.
-        r (float): Risk-free rate.
-        sigma (float): Volatility of the stock.
-        T (float): Time to maturity of the option.
-        N (int): Number of time steps in the discretization.
-        M (int): Number of simulated paths.
-        confidence_level (float): The alpha value for the confidence interval calculation.
-        samples (int): Number of BSDE samples to estimate the price.
-        mu (float): Drift rate of the stock, defaults to r if not provided.
-        option_payoff (str): Type of the option ('call' or 'put').
-        domain (list[int]): The domain which the hybercubes cover.
-        delta (float): The length of the hybercubes.
-    """
+class BSDEOptionPricingEuropean:
     def __init__(self, S0, mu, sigma, correlation, K, r, T, N, M,  confidence_level = 0.025, 
                  samples = 50, dims = 1, option_payoff = "call", H = 60, delta= 1, k = 0):
         self._validation_check(S0, mu, sigma, K, r, T, N, M, 
                          confidence_level, samples, dims, 
                          option_payoff, H, delta) 
-        self.S0 = np.full(dims, S0) 
-        self.mu = np.full(dims, mu) 
-        self.sigma = np.full(dims, sigma)
+        self.S0 = np.float32(S0) 
+        self.mu = np.float32(mu) 
+        self.sigma = np.float32(sigma)
         self.K = np.float32(K)
         self.r = np.float32(r)
         self.T = np.float32(T)
@@ -60,12 +43,18 @@ class BSDEOptionPricingEuropean:
     def _validation_check(self, S0, mu, sigma, K, r, T, N, M,
                           confidence_level, samples, dims,
                           option_payoff, H, delta):
+        if not isinstance(S0, (int, float)) or S0 <= 0:
+            raise ValueError('S must be positive number.')
+        if not isinstance(mu, (int, float)):
+            raise ValueError('mu must be a number.')
+        if not isinstance(sigma, (int, float)) or sigma <= 0:
+            raise ValueError('Sigma must be positive number.')
         if not isinstance(K, (int, float)) or K <= 0:
-            raise ValueError('K must be positive.')
+            raise ValueError('K must be positive number.')
         if not isinstance(T, (int, float)) or T <= 0:
-            raise ValueError('T must be positive.')
+            raise ValueError('T must be positive number.')
         if not isinstance(r, (int, float)):
-            raise ValueError('r must be an integer or float.')
+            raise ValueError('r must be a number.')
         if not isinstance(N, int) or N <= 0:
             raise ValueError('N must be a positive integer.')
         if not isinstance(M, int) or M <= 0:
@@ -134,17 +123,17 @@ class BSDEOptionPricingEuropean:
         S = np.empty((self.dims, self.M, self.N+1))
         
         for dim in range(self.dims):
-            S[dim, :, 0] = self.S0[dim]
+            S[dim, :, 0] = self.S0
             
             log_S = np.cumsum(
-                (self.mu[dim] - 0.5 * self.sigma[dim]**2) * self.dt + 
-                self.sigma[dim] * correlated_dw[dim, :, :], 
+                (self.mu - 0.5 * self.sigma**2) * self.dt + 
+                self.sigma * correlated_dw[dim, :, :], 
                 axis=1
             )
             
-            S[dim, :, 1:] = self.S0[dim] * np.exp(log_S)
+            S[dim, :, 1:] = self.S0 * np.exp(log_S)
         
-        return S,correlated_dw 
+        return S, correlated_dw 
 
     def _generate_hypercube_basis(self, S):
         H = self.H 
@@ -153,7 +142,7 @@ class BSDEOptionPricingEuropean:
         M = S.shape[1]
         dim_phi = num_cubes_per_dim ** self.dims * num_basis_per_cube
         indicators = sp.lil_matrix((M, dim_phi))
-        cube_ranges = [range(int((self.S0[dim] - H) // self.delta), int((self.S0[dim] + H) // self.delta)) for dim in range(self.dims)]
+        cube_ranges = [range(int((self.S0 - H) // self.delta), int((self.S0 + H) // self.delta)) for dim in range(self.dims)]
         cube_indices = list(itertools.product(*cube_ranges))
 
         for i, cube_index in enumerate(cube_indices):
@@ -188,8 +177,6 @@ class BSDEOptionPricingEuropean:
         """ Returns the driver in the BSDE with same interest for lending and borrowing """
         sum_term = np.sum((self.lamb) / self.sigma * Z, axis=1, keepdims=True)
         return -(sum_term + self.r * Y_plus)
-        return -(Z * self.lamb + self.r * Y_plus)
-
 
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
@@ -203,7 +190,6 @@ class BSDEOptionPricingEuropean:
             if ((np.max(S) > (np.max(self.S0) + self.H)) or 
                 (np.min(S) < (np.min(self.S0) - self.H))):
                 domain_out_of_range = True
-            print(np.max(S))
             Y_plus = self._payoff_func(S[:, :, -1])
             Y = np.zeros(self.M)
             Z = np.zeros((self.M, self.dims))
@@ -430,9 +416,9 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
         domain_out_of_range = False
         Y0_samples = np.zeros(self.samples)
         Z0_samples = np.zeros((self.dims, self.samples))
-        discount_factor = np.exp(-self.r * self.dt)
 
         for k in range(self.samples):
+            sample_time = time.time()
             S, dw = self._generate_stock_paths()
             if ((np.max(S) > (np.max(self.S0) + self.H)) or 
                 (np.min(S) < (np.min(self.S0) - self.H))):
@@ -449,10 +435,11 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
                 Y_plus = np.maximum(Y, exercise_values)
                 del p_li, A
                 gc.collect()
-             
+
             Y0_samples[k] = np.mean(Y_plus)
             Z0_samples[:, k] = np.mean(Z, axis=0)
-            print(f"Done with sample: {k+1}")
+            sample_finish_time = time.time() - sample_time
+            print(f"Done with sample: {k+1} in {sample_finish_time} seconds")
         if domain_out_of_range:
             print("Domain possibly out of range, consider increasing H!")
         return Y0_samples, Z0_samples
@@ -490,7 +477,14 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
 
     def _driver(self, Y_plus, Z):
         """ Returns the driver in the BSDE for different interest rates for borrowing and lending """
-        return -(Y_plus*self.R + Z * self.lamb - (self.R-self.r)*np.minimum(Y_plus - Z/self.sigma, 0)) 
+        Z_sum = np.sum(Z, axis=1, keepdims=True)
+        
+        term1 = Y_plus* self.R
+        term2 = Z_sum * self.lamb
+        term3 = (self.R - self.r) * np.minimum(Y_plus - Z_sum/self.sigma, 0)
+
+        result = - term1 - term2 + term3
+        return result
 
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
@@ -499,6 +493,7 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
         Z0_samples = np.zeros((self.dims, self.samples))
 
         for k in range(self.samples):
+            sample_time = time.time()
             S, dw = self._generate_stock_paths()
             if ((np.max(S) > (np.max(self.S0) + self.H)) or 
                 (np.min(S) < (np.min(self.S0) - self.H))):
@@ -515,7 +510,8 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
              
             Y0_samples[k] = np.mean(Y_plus)
             Z0_samples[:, k] = np.mean(Z, axis=0)
-            print(f"Done with sample: {k+1}")
+            sample_finish_time = time.time() - sample_time
+            print(f"Done with sample: {k+1} in {sample_finish_time} seconds")
         if domain_out_of_range:
             print("Domain possibly out of range, consider increasing H!")
         return Y0_samples, Z0_samples
@@ -523,7 +519,6 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
     def __repr__(self):
         base_repr = super().__repr__()
         return base_repr[:-1] + f"\n  opt_style='{self._opt_style}'\n  K2='{self.K2}'\n  R='{self.R}'\n)"
-
 
 class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropeanSpread):
     def __init__(self, S0, mu, sigma, correlation, K, r, T, N, M, confidence_level, samples, dims, option_payoff, domain, delta, k, K2, R):
@@ -537,6 +532,7 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropeanSpread):
         Z0_samples = np.zeros((self.dims, self.samples))
 
         for k in range(self.samples):
+            sample_time = time.time()
             S, dw = self._generate_stock_paths()
             if ((np.max(S) > (np.max(self.S0) + self.H)) or 
                 (np.min(S) < (np.min(self.S0) - self.H))):
@@ -553,7 +549,8 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropeanSpread):
              
             Y0_samples[k] = np.mean(Y_plus)
             Z0_samples[:, k] = np.mean(Z, axis=0)
-            print(f"Done with sample: {k+1}")
+            sample_finish_time = time.time() - sample_time
+            print(f"Done with sample: {k+1} in {sample_finish_time} seconds")
         if domain_out_of_range:
             print("Domain possibly out of range, consider increasing H!")
         return Y0_samples, Z0_samples

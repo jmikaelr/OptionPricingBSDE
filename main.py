@@ -39,10 +39,6 @@ def main():
     else:
         plot_values = [int(x) for x in args.plot_values.split(',')] if args.plot_values else None
     price = None
-    if args.dims != 1:
-        args.S = np.full(args.dims, args.S)
-        args.mu = np.full(args.dims, args.mu)
-        args.sigma = np.full(args.dims, args.sigma)
     if args.opt_style in ['european', 'americanspread', 'europeanspread', 'american']:
         if args.opt_style == 'european':
             option_pricing_obj = BSDEOptionPricingEuropean(args.S, args.mu, args.sigma, 
@@ -51,11 +47,7 @@ def main():
                                                            args.L, args.samples, args.dims, 
                                                            args.opt_payoff, args.H, 
                                                            args.delta, args.k)
-            if args.dims != 1:
-                pass
-                #price = multi_dimensional_black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
-            else:
-                price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
+            price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
         elif args.opt_style == 'american':
             option_pricing_obj = BSDEOptionPricingAmerican(args.S, args.mu, args.sigma, 
                                                            args.corr, args.K,
