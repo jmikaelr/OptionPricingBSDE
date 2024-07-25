@@ -8,6 +8,7 @@ from scipy.stats import norm
 import scipy.sparse as sp
 import scipy.sparse.linalg as splinalg
 import matplotlib.pyplot as plt
+import inspect
 
 class BSDEOptionPricingEuropean:
     def __init__(self, S0, mu, sigma, correlation, K, r, T, N, M,  confidence_level = 0.025, 
@@ -106,36 +107,35 @@ class BSDEOptionPricingEuropean:
             raise TypeError('Invalid option type! It should be call or put')
 
     def _payoff_func(self, S):
+        K = self.K
         if self.option_payoff == "call":
-            payoff = np.maximum(np.max(S, axis=0) - self.K, 0)
+            payoff = np.maximum(np.max(S, axis=0) - K, 0)
         elif self.option_payoff == "put":
-            payoff = np.maximum(self.K - np.max(S, axis=0), 0)
+            payoff = np.maximum(K - np.max(S, axis=0), 0)
         else:
             raise ValueError("Unsupported option payoff type.")
         payoff = np.expand_dims(payoff, axis=1)
         return payoff
 
     def _generate_stock_paths(self):
-        """ S is d-dimensional forward component (Euler Scheme) """
-        """ With M simulations and N steps S will be a dxMxN matrix """
-        dw = np.random.normal(0, np.sqrt(self.dt), (self.dims, self.M, self.N)) 
-        L = np.linalg.cholesky(self.correlation)
-        correlated_dw = np.einsum('ij,jkl->ikl', L, dw)
+        d = self.dims
+        M = self.M
+        N = self.N
+        T = self.T
+        r = self.r
+        sigma = self.sigma
+        S0 = self.S0
+        L = np.linalg.cholesky(self.correlation).T
+        dW = np.random.normal(0, np.sqrt(T / N), (M * N, d))
+        dW = np.dot(dW, L)
+        dW = dW.reshape(M, N, d).transpose(0, 2, 1)
+        W = np.cumsum(dW, axis=2)
+        t = np.linspace(T / N, T, N, endpoint=True, dtype=np.float32)
+        X = np.exp((r - sigma ** 2 / 2) * t + sigma * W) * S0
+        X = X.reshape((d, M, N))
+        dW = dW.reshape((d, M, N))
         
-        S = np.empty((self.dims, self.M, self.N+1))
-        
-        for dim in range(self.dims):
-            S[dim, :, 0] = self.S0
-            
-            log_S = np.cumsum(
-                (self.mu - 0.5 * self.sigma**2) * self.dt + 
-                self.sigma * correlated_dw[dim, :, :], 
-                axis=1
-            )
-            
-            S[dim, :, 1:] = self.S0 * np.exp(log_S)
-        
-        return S, correlated_dw 
+        return X, dW
 
     def _generate_hypercube_basis(self, S):
         H = self.H 
@@ -172,8 +172,8 @@ class BSDEOptionPricingEuropean:
                     polynomial_values = (np.prod([S[dim, :, t] ** poly_degrees[dim] 
                         for dim in range(dims)], axis=0))
                     indicators[:, basis_index] = indicator * polynomial_values
-            indicators_list.append(sp.csr_matrix(indicators))
-        
+
+            indicators_list.append(sp.coo_matrix(indicators))
         return indicators_list
 
     def _generate_Z(self, p_li, A, Y_plus, dw):
@@ -183,7 +183,7 @@ class BSDEOptionPricingEuropean:
         for d in range(self.dims):
             alpha_z = splinalg.lsqr(A, b_z[:, d].toarray() if sp.issparse(b_z[:, d]) else 
                                     b_z[:, d], atol=0,btol=0,conlim=0)[0]
-            Z[:, d] = (p_li @ alpha_z)
+            Z[:, d] = (p_li @ alpha_z) 
         return Z / self.dt
        
     def _generate_Y(self, p_li, A, Y_plus, Z):
@@ -235,10 +235,12 @@ class BSDEOptionPricingEuropean:
 
     def _confidence_interval(self, sample):
         """ Calculates the confidence interval with confidence_level """ 
+        confidence_level = self.confidence_level
+        samples = self.samples
         mean_sample = np.mean(sample)
         std_sample = np.std(sample, ddof=1)
-        upper = mean_sample + norm.ppf(1-self.confidence_level/2) * std_sample/np.sqrt(self.samples)
-        lower = mean_sample - norm.ppf(1-self.confidence_level/2) * std_sample/np.sqrt(self.samples)
+        upper = mean_sample + norm.ppf(1-confidence_level/2) * std_sample/np.sqrt(samples)
+        lower = mean_sample - norm.ppf(1-confidence_level/2) * std_sample/np.sqrt(samples)
         CI = [round(lower,4), round(upper,4)]
         return mean_sample, std_sample, CI
 
@@ -496,12 +498,14 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
         self._opt_style = 'europeanspread'
 
     def _payoff_func(self, S):
+        K = self.K
+        K2 = self.K2
         if self.option_payoff == "call":
-            payoff = (np.maximum(np.max(S, axis=0) - self.K, 0) - 
-                    2*np.maximum(np.max(S, axis=0) - self.K2, 0))
+            payoff = (np.maximum(np.max(S, axis=0) - K, 0) - 
+                    2*np.maximum(np.max(S, axis=0) - K2, 0))
         elif self.option_payoff == "put":
-            payoff = (np.maximum(self.K - np.max(S, axis=0) , 0) - 
-                    2*np.maximum(self.K2 - np.max(S, axis=0) , 0))
+            payoff = (np.maximum(K - np.max(S, axis=0) , 0) - 
+                    2*np.maximum(K2 - np.max(S, axis=0) , 0))
 
         else:
             raise ValueError(f"Unsupported option payoff type {self.option_payoff}.")
@@ -512,13 +516,12 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
         """ Returns the driver in the BSDE for different interest rates for borrowing and lending """
         Z_sum = np.sum(Z, axis=1, keepdims=True)
         
-        term1 = Y_plus* self.R
+        term1 = Y_plus * self.R
         term2 = Z_sum * self.lamb
         term3 = (self.R - self.r) * np.minimum(Y_plus - Z_sum/self.sigma, 0)
 
         result = - term1 - term2 + term3
         return result
-
 
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
@@ -601,5 +604,3 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropeanSpread):
     def __repr__(self):
         base_repr = super().__repr__()
         return base_repr[:-1] + f"\n  opt_style='{self._opt_style}'\n  K2='{self.K2}'\n  R='{self.R}'\n)"
-
-

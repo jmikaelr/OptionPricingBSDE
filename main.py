@@ -119,10 +119,9 @@ def profile_solve():
 
 
 if __name__ == '__main__':
-    #profiler = Profiler()
-    #profiler.start()
+#    profiler = Profiler()
+#    profiler.start()
     main()
-    #profiler.stop()
-    #print(profiler.output_text(unicode=True, color=True))
-
+#    profiler.stop()
+#    print(profiler.output_text(unicode=True, color=True))
 
