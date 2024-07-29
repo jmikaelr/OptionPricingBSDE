@@ -14,8 +14,9 @@ def main():
     parser.add_argument("--K2", type=float, default=105, help="Second strike price")
     parser.add_argument("--r", type=float, default=0.01, help="Rate")
     parser.add_argument("--R", type=float, default=0.06, help="Second rate")
+    parser.add_argument("--div", type=float, default=0, help="Dividend yield")
     parser.add_argument("--dims", type=int, default=1, help="Number of risky assets (stocks), default is one.")
-    parser.add_argument("--mu", type=float, default=0.01, help="Drift term on stock")
+    parser.add_argument("--mu", type=float, default=0.0, help="Drift term on stock")
     parser.add_argument("--sigma", type=float, default=0.2, help="Volatility (sigma)")
     parser.add_argument("--corr", type=float, default=0.5, help="Correlation (rho)")
     parser.add_argument("--T", type=float, default=0.25, help="Time to expiration (in years)")
@@ -42,15 +43,18 @@ def main():
         if args.opt_style == 'european':
             option_pricing_obj = BSDEOptionPricingEuropean(args.S, args.mu, args.sigma, 
                                                            args.corr, args.K,
-                                                           args.r, args.T, args.N, args.M, 
+                                                           args.r, args.div, args.T, 
+                                                           args.N, args.M, 
                                                            args.L, args.samples, args.dims, 
                                                            args.opt_payoff, args.H, 
                                                            args.delta, args.k)
-            price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
+            if args.dims == 1:
+                price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
         elif args.opt_style == 'american':
             option_pricing_obj = BSDEOptionPricingAmerican(args.S, args.mu, args.sigma, 
                                                            args.corr, args.K,
-                                                           args.r, args.T, args.N, args.M, 
+                                                           args.r, args.div, args.T, 
+                                                           args.N, args.M, 
                                                            args.L, args.samples, args.dims, 
                                                            args.opt_payoff, args.H, 
                                                            args.delta, args.k)
@@ -106,22 +110,6 @@ def black_scholes(S, K, T, r, sigma, opt_payoff):
     else:
         raise ValueError(f'Invalid payoff {opt_payoff}, it must be either "call" or "put"')
 
-def profile_solve():
-    pr = cProfile.Profile()
-    pr.enable()
-    option_pricing_obj.solve()
-    pr.disable()
-    s = io.StringIO()
-    sortby = 'cumulative'
-    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-    ps.print_stats()
-    print(s.getvalue())
-
-
 if __name__ == '__main__':
-#    profiler = Profiler()
-#    profiler.start()
     main()
-#    profiler.stop()
-#    print(profiler.output_text(unicode=True, color=True))
 

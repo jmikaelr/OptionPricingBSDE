@@ -1,4 +1,6 @@
 import time
+import tracemalloc
+from joblib import Parallel, delayed
 import itertools
 import yaml
 import pandas as pd
@@ -11,9 +13,9 @@ import matplotlib.pyplot as plt
 import inspect
 
 class BSDEOptionPricingEuropean:
-    def __init__(self, S0, mu, sigma, correlation, K, r, T, N, M,  confidence_level = 0.025, 
+    def __init__(self, S0, mu, sigma, correlation, K, r, div, T, N, M,  confidence_level = 0.025, 
                  samples = 50, dims = 1, option_payoff = "call", H = 60, delta= 1, k = 0):
-        self._validation_check(S0, mu, sigma, K, r, T, N, M, 
+        self._validation_check(S0, mu, sigma, K, r, div, T, N, M, 
                          confidence_level, samples, dims, 
                          option_payoff, H, delta) 
         self.S0 = np.float64(S0) 
@@ -21,6 +23,7 @@ class BSDEOptionPricingEuropean:
         self.sigma = np.float64(sigma)
         self.K = np.float16(K)
         self.r = np.float64(r)
+        self.dividend = np.float64(div)
         self.T = np.float16(T)
         self.N = np.uint32(N)
         self.M = np.uint32(M)
@@ -29,7 +32,7 @@ class BSDEOptionPricingEuropean:
         self.samples = np.uint16(samples)
         self.dims = np.uint8(dims)
         self.option_payoff = option_payoff
-        self.H = np.uint8(H)
+        self.H = np.uint16(H)
         self.delta = np.uint8(delta)
         self.num_cubes_per_dim = int(2 * H // delta)
         self.num_basis_per_cube = (k + 1) ** dims
@@ -43,7 +46,7 @@ class BSDEOptionPricingEuropean:
             else self._construct_correlation_matrix(correlation))
         self._opt_style = 'european'
 
-    def _validation_check(self, S0, mu, sigma, K, r, T, N, M,
+    def _validation_check(self, S0, mu, sigma, K, r, div, T, N, M,
                           confidence_level, samples, dims,
                           option_payoff, H, delta):
         if not isinstance(S0, (int, float)) or S0 <= 0:
@@ -58,6 +61,8 @@ class BSDEOptionPricingEuropean:
             raise ValueError('T must be positive number.')
         if not isinstance(r, (int, float)):
             raise ValueError('r must be a number.')
+        if not isinstance(div, (int, float)):
+            raise ValueError('dividend must be a number.')
         if not isinstance(N, int) or N <= 0:
             raise ValueError('N must be a positive integer.')
         if not isinstance(M, int) or M <= 0:
@@ -123,6 +128,7 @@ class BSDEOptionPricingEuropean:
         N = self.N
         T = self.T
         r = self.r
+        div = self.dividend
         sigma = self.sigma
         S0 = self.S0
         L = np.linalg.cholesky(self.correlation).T
@@ -131,14 +137,13 @@ class BSDEOptionPricingEuropean:
         dW = dW.reshape(M, N, d).transpose(0, 2, 1)
         W = np.cumsum(dW, axis=2)
         t = np.linspace(T / N, T, N, endpoint=True, dtype=np.float32)
-        X = np.exp((r - sigma ** 2 / 2) * t + sigma * W) * S0
+        X = np.exp((r - div - sigma ** 2 / 2) * t + sigma * W) * S0
         X = X.reshape((d, M, N))
         dW = dW.reshape((d, M, N))
         
         return X, dW
 
     def _generate_hypercube_basis(self, S):
-        H = self.H 
         k = self.k
         delta = self.delta
         dims = self.dims
@@ -200,37 +205,46 @@ class BSDEOptionPricingEuropean:
             ((self.mu - self.r)/self.sigma) * Z[:, dim]
         return -(self.r * Y_plus + sum_term) 
 
+    def _sample_task(self, sample_id):
+        sample_time = time.time()
+        S, dw = self._generate_stock_paths()
+        domain_out_of_range = ((np.max(S) > (self.S0 + self.H)) or 
+                               (np.min(S) < (self.S0 - self.H)))
+        Y_plus = self._payoff_func(S[:, :, -1])
+        Y = np.zeros(self.M)
+        Z = np.zeros((self.M, self.dims))
+        p_li_list = self._generate_hypercube_basis(S)
+        for i in range(self.N - 1, -1, -1):
+            p_li = p_li_list[i] 
+            A = p_li.T @ p_li
+            Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
+            Y = self._generate_Y(p_li, A, Y_plus, Z)
+            Y_plus = Y 
+            del p_li, A
+
+        Y0_sample = np.mean(Y_plus)
+        Z0_sample = np.mean(Z, axis=0)
+        sample_finish_time = time.time() - sample_time
+        print(f"Done with sample: {sample_id+1} in {sample_finish_time} seconds")
+        return Y0_sample, Z0_sample, domain_out_of_range
+
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
-        domain_out_of_range = False
-        Y0_samples = np.zeros(self.samples) 
-        Z0_samples = np.zeros((self.dims, self.samples))
+        results = Parallel(n_jobs=-1)(delayed(self._sample_task)(k) for k in range(self.samples))
         
-        for k in range(self.samples):
-            sample_time = time.time()
-            S, dw = self._generate_stock_paths()
-            if ((np.max(S) > (np.max(self.S0) + self.H)) or 
-                (np.min(S) < (np.min(self.S0) - self.H))):
+        Y0_samples = np.zeros(self.samples)
+        Z0_samples = np.zeros((self.dims, self.samples))
+        domain_out_of_range = False
+
+        for k, result in enumerate(results):
+            Y0_samples[k] = result[0]
+            Z0_samples[:, k] = result[1]
+            if result[2]:
                 domain_out_of_range = True
-            Y_plus = self._payoff_func(S[:, :, -1])
-            Y = np.zeros(self.M)
-            Z = np.zeros((self.M, self.dims))
-            p_li_list = self._generate_hypercube_basis(S)
-            for i in range(self.N - 1, -1, -1):
-                p_li = p_li_list[i] 
-                A = p_li.T @ p_li
-                Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
-                Y = self._generate_Y(p_li, A, Y_plus, Z)
-                Y_plus = Y
-                del p_li, A
-             
-            Y0_samples[k] = np.mean(Y_plus)
-            Z0_samples[:, k] = np.mean(Z, axis=0)
-            sample_finish_time = time.time() - sample_time
-            print(f"Done with sample: {k+1} in {sample_finish_time} seconds")
-            del p_li_list, S, dw, Z, Y, Y_plus
+
         if domain_out_of_range:
             print("Domain possibly out of range, consider increasing H!")
+            
         return Y0_samples, Z0_samples
 
     def _confidence_interval(self, sample):
@@ -247,91 +261,135 @@ class BSDEOptionPricingEuropean:
     def plot_and_show_table_by_N(self, N_values, nofig=False, bs_price=None):
         """ Plots and show tables by varying N """
         function_name = inspect.currentframe().f_code.co_name
-        Y, Z, Y_errors, Z_errors, rows = [], [], [], [], []
+        Y, Z, Y_errors, Z_errors, rows, computation_times = [], [], [], [], [], []
 
         for N_val in N_values:
+            start_time = time.time()
             self.N = N_val
             self.dt = self.T / self.N
             Y0_array, Z0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
 
+            end_time = time.time()
+            computation_time = end_time - start_time
+
             Y.append(est_Y0)
             Z.append(est_Z0)
             Y_errors.append(std_Y0)
             Z_errors.append(std_Z0)
+            computation_times.append(computation_time)
             rows.append([N_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
-                         CI_Z[0], CI_Z[1]])
+                         CI_Z[0], CI_Z[1], computation_time])
             print(f'Done with N: {N_val}.')
 
         self._generate_plot(N_values, Y, Y_errors, function_name, bs_price, nofig)
         self._generate_table(rows, function_name)
 
+        self._plot_computation_times(N_values, computation_times, function_name)
+
     def plot_and_show_table_by_M(self, M_values, nofig=False, bs_price=None):
         """ Plots and show tables by varying M """
         function_name = inspect.currentframe().f_code.co_name
-        Y, Z, Y_errors, Z_errors, rows = [], [], [], [], []
+        Y, Z, Y_errors, Z_errors, rows, computation_times, memory_usages, errors = [], [], [], [], [], [], [], []
 
         for M_val in M_values:
+            tracemalloc.start()
+            start_time = time.time()
             self.M = M_val
             Y0_array, Z0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
 
+            #error = 1/self.samples * np.sum((est_Y0 - bs_price)**2)
+            error = 0
+
+            end_time = time.time()
+            computation_time = end_time - start_time
+
+            _, memory_usage_bytes = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            memory_usage_megabytes = memory_usage_bytes / 10e6
+
+
             Y.append(est_Y0)
             Z.append(est_Z0)
             Y_errors.append(std_Y0)
             Z_errors.append(std_Z0)
+            errors.append(error)
+            
+            computation_times.append(computation_time)
+            memory_usages.append(memory_usage_megabytes)
+
             rows.append([M_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
-                         CI_Z[0], CI_Z[1]])
+                         CI_Z[0], CI_Z[1], computation_time, memory_usage_megabytes])
             print(f'Done with M_val: {M_val}.')
 
         self._generate_plot(M_values, Y, Y_errors, function_name, bs_price, nofig)
         self._generate_table(rows, function_name)
 
+        self._plot_computation_times(M_values, computation_times, function_name)
+        self._plot_convergence_vs_computation_time(computation_times, errors, function_name)
+        self._plot_memory_usage_vs_convergence_error(memory_usages, errors, function_name)
+
     def plot_and_show_table_by_deltas(self, deltas, nofig=False, bs_price=None):
         """ Plots and show tables by varying degrees """
         function_name = inspect.currentframe().f_code.co_name
-        Y, Z, Y_errors, Z_errors, rows = [], [], [], [], []
+        Y, Z, Y_errors, Z_errors, rows, computation_times = [], [], [], [], [], []
 
         for delta in deltas:
+            start_time = time.time()
             self.delta = delta 
             Y0_array, Z0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
 
+            end_time = time.time()
+            computation_time = end_time - start_time
+
             Y.append(est_Y0)
             Z.append(est_Z0)
             Y_errors.append(std_Y0)
             Z_errors.append(std_Z0)
+            computation_times.append(computation_time)
             rows.append([delta, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
-                         CI_Z[0], CI_Z[1]])
+                         CI_Z[0], CI_Z[1], computation_time])
             print(f'Done with delta: {delta}.')
 
         self._generate_plot(deltas, Y, Y_errors, function_name, bs_price, nofig)
         self._generate_table(rows, function_name)
 
+        self._plot_computation_times(deltas, computation_times, function_name)
+
     def plot_and_show_table_by_samples(self, samples, nofig=False, bs_price=None):
         """ Plots and show tables by varying samples """
         function_name = inspect.currentframe().f_code.co_name
-        Y, Z, Y_errors, Z_errors, rows = [], [], [], [], []
+        Y, Z, Y_errors, Z_errors, rows, computation_times = [], [], [], [], [], []
 
         for sample in samples:
+            start_time = time.time()
+            
             self.samples = sample
             Y0_array, Z0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
-
+            
+            end_time = time.time()
+            computation_time = end_time - start_time
+            
             Y.append(est_Y0)
             Z.append(est_Z0)
             Y_errors.append(std_Y0)
             Z_errors.append(std_Z0)
+            computation_times.append(computation_time)
             rows.append([sample, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
-                         CI_Z[0], CI_Z[1]])
-            print(f'Done with sample: {sample}.')
+                         CI_Z[0], CI_Z[1], computation_time])
+            print(f'Done with sample: {sample}. Computation time: {computation_time:.4f} seconds')
 
         self._generate_plot(samples, Y, Y_errors, function_name, bs_price, nofig)
         self._generate_table(rows, function_name)
+        
+        self._plot_computation_times(samples, computation_times, function_name)
 
     def _generate_plot(self, x_values, y_values, y_errors, function_name, bs_price, nofig):
         """ Generates the plot with the configs in the yaml file """
@@ -371,6 +429,68 @@ class BSDEOptionPricingEuropean:
             plt.show()
         plt.close()
 
+
+    def _plot_memory_usage_vs_convergence_error(self, memory_usages, errors, function_name):
+        plot_name = (function_name.split("_")[-1]).capitalize()
+        print(memory_usages)
+        print(errors)
+        """ Plots the memory usage against the convergence rate"""
+        plt.figure()
+        plt.plot(memory_usages, errors, 'o-', label='Memory Usage - Convergence Rate')
+        plt.xlabel('Memory Usage (MB)')
+        plt.ylabel('Convergence Rate')
+        plt.title(f'Convergence Rate vs. Memory Usage')
+        plt.legend(loc='best')
+        plt.grid(True)
+
+        plot_directory = os.path.join('plots', function_name)
+        os.makedirs(plot_directory, exist_ok=True)
+
+        plot_name = f'memory_usage_vs_convergence_{plot_name.lower()}{self.opt_style}_{self.option_payoff}.png'
+        plot_path = os.path.join(plot_directory, plot_name)
+        plt.savefig(plot_path)
+        plt.show()
+        plt.close()
+
+    def _plot_computation_times(self, samples, computation_times, function_name):
+        plot_name = (function_name.split("_")[-1]).capitalize()
+        """ Plots the computation times against the number of samples """
+        plt.figure()
+        plt.plot(samples, computation_times, 'o-', label='Computation Time')
+        plt.xlabel(f'Number of {plot_name}')
+        plt.ylabel('Computation Time (seconds)')
+        plt.title(f'Computation Time vs. Number of {plot_name}')
+        plt.legend(loc='best')
+        plt.grid(True)
+
+        plot_directory = os.path.join('plots', function_name)
+        os.makedirs(plot_directory, exist_ok=True)
+
+        plot_name = f'computation_time_vs_{plot_name.lower()}{self.opt_style}_{self.option_payoff}.png'
+        plot_path = os.path.join(plot_directory, plot_name)
+        plt.savefig(plot_path)
+        plt.show()
+        plt.close()
+
+    def _plot_convergence_vs_computation_time(self, computation_times, errors, function_name):
+        """ Plots the convergence rate of the option price estimates as a function of computation time """
+        name = function_name.split("_")[-1]
+        plt.figure()
+        plt.xlabel('Computation Time (seconds)')
+        plt.ylabel('MSE Error')
+        plt.plot(computation_times, errors, label = 'Convergence Rate')
+        plt.title(f'Convergence Rate vs. Computation Time for {name}')
+        plt.grid(True)
+
+        plot_directory = os.path.join('plots', function_name)
+        os.makedirs(plot_directory, exist_ok=True)
+
+        plot_name = f'convergence_vs_computation_time_{self.opt_style}_{self.option_payoff}.png'
+        plot_path = os.path.join(plot_directory, plot_name)
+        plt.savefig(plot_path)
+        plt.show()
+        plt.close()
+
     def _generate_table(self, rows, function_name):
         """ Generates the table with the configs in the yaml file """
         configs = self._load_configs()
@@ -384,7 +504,8 @@ class BSDEOptionPricingEuropean:
             [function_name.split('_')[-1].capitalize(), 
              'Estimated Price Y0', 'Std. Deviation Y0',
             'CI Lower Bound Y0', 'CI Upper Bound Y0','Estimated Volatility Z0', 
-            'Std. Deviation Z0', 'CI Lower Bound Z0', 'CI Upper Bound Z0']
+            'Std. Deviation Z0', 'CI Lower Bound Z0', 'CI Upper Bound Z0', 
+            'Computation Time', 'Memoery Usage (MB)']
         )
 
         table_name = configs['plot_config'][function_name]['table_name_template'].format(
@@ -438,44 +559,51 @@ class BSDEOptionPricingEuropean:
         )
 
 class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
-    def __init__(self, S0, mu, sigma, correlation, K, r, T, N, M, confidence_level = 0.025, 
+    def __init__(self, S0, mu, sigma, correlation, K, r, div, T, N, M, confidence_level = 0.025, 
                  samples = 50, dims = 1, option_payoff = "call", H = 60, delta = 1, k=0): 
-        super().__init__(S0, mu, sigma, correlation, K, r, T, N, M, confidence_level, 
+        super().__init__(S0, mu, sigma, correlation, K, r, div, T, N, M, confidence_level, 
                          samples, dims, option_payoff, H, delta, k)
         self._opt_style = 'american'
 
+    def _sample_task(self, sample_id):
+        sample_time = time.time()
+        S, dw = self._generate_stock_paths()
+        domain_out_of_range = ((np.max(S) > (self.S0 + self.H)) or 
+                               (np.min(S) < (self.S0 - self.H)))
+        Y_plus = self._payoff_func(S[:, :, -1])
+        Y = np.zeros(self.M)
+        Z = np.zeros((self.M, self.dims))
+        p_li_list = self._generate_hypercube_basis(S)
+        for i in range(self.N - 1, -1, -1):
+            p_li = p_li_list[i] 
+            A = p_li.T @ p_li
+            Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
+            Y = self._generate_Y(p_li, A, Y_plus, Z)
+            exercise_values = self._payoff_func(S[:, :, i])
+            Y_plus = np.maximum(Y, exercise_values)
+        Y0_sample = np.mean(Y_plus)
+        Z0_sample = np.mean(Z, axis=0)
+        sample_finish_time = time.time() - sample_time
+        print(f"Done with sample: {sample_id+1} in {sample_finish_time} seconds")
+        return Y0_sample, Z0_sample, domain_out_of_range
+
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
-        domain_out_of_range = False
+        results = Parallel(n_jobs=-1)(delayed(self._sample_task)(k) for k in range(self.samples))
+        
         Y0_samples = np.zeros(self.samples)
         Z0_samples = np.zeros((self.dims, self.samples))
+        domain_out_of_range = False
 
-        for k in range(self.samples):
-            sample_time = time.time()
-            S, dw = self._generate_stock_paths()
-            if ((np.max(S) > (np.max(self.S0) + self.H)) or 
-                (np.min(S) < (np.min(self.S0) - self.H))):
+        for k, result in enumerate(results):
+            Y0_samples[k] = result[0]
+            Z0_samples[:, k] = result[1]
+            if result[2]:
                 domain_out_of_range = True
-            Y_plus = self._payoff_func(S[:, :, -1])
-            Y = np.zeros(self.M)
-            Z = np.zeros((self.M, self.dims))
-            p_li_list = self._generate_hypercube_basis(S)
-            for i in range(self.N - 1, -1, -1):
-                p_li = p_li_list[i] 
-                A = p_li.T @ p_li
-                Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
-                Y = self._generate_Y(p_li, A, Y_plus, Z)
-                exercise_values = self._payoff_func(S[:, :, i])
-                Y_plus = np.maximum(Y, exercise_values)
-                del p_li, A
-             
-            Y0_samples[k] = np.mean(Y_plus)
-            Z0_samples[:, k] = np.mean(Z, axis=0)
-            sample_finish_time = time.time() - sample_time
-            print(f"Done with sample: {k+1} in {sample_finish_time} seconds")
-            del p_li_list, S, dw, Z, Y, Y_plus
+
         if domain_out_of_range:
             print("Domain possibly out of range, consider increasing H!")
+            
         return Y0_samples, Z0_samples
 
     def __repr__(self):
