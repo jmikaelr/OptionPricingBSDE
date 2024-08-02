@@ -1,5 +1,5 @@
 import time
-import tracemalloc
+import psutil
 from joblib import Parallel, delayed
 import itertools
 import yaml
@@ -11,6 +11,8 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as splinalg
 import matplotlib.pyplot as plt
 import inspect
+from threading import Thread
+import torch
 
 class BSDEOptionPricingEuropean:
     def __init__(self, S0, mu, sigma, correlation, K, r, div, T, N, M,  confidence_level = 0.025, 
@@ -123,6 +125,7 @@ class BSDEOptionPricingEuropean:
         return payoff
 
     def _generate_stock_paths(self):
+        """ In order to generate same samples as in the optimal stopping code utilising DNN """
         d = self.dims
         M = self.M
         N = self.N
@@ -131,27 +134,31 @@ class BSDEOptionPricingEuropean:
         div = self.dividend
         sigma = self.sigma
         S0 = self.S0
-        L = np.linalg.cholesky(self.correlation).T
-        dW = np.random.normal(0, np.sqrt(T / N), (M * N, d))
-        dW = np.dot(dW, L)
-        dW = dW.reshape(M, N, d).transpose(0, 2, 1)
-        W = np.cumsum(dW, axis=2)
-        t = np.linspace(T / N, T, N, endpoint=True, dtype=np.float32)
-        X = np.exp((r - div - sigma ** 2 / 2) * t + sigma * W) * S0
-        X = X.reshape((d, M, N))
-        dW = dW.reshape((d, M, N))
+        """ Simulates the stock price that follows a GBM with Euler scheme """
+        correlation = self.correlation
+        dt = T/N
+        q = np.ones([d, d], dtype=np.float32) * correlation
+        np.fill_diagonal(q, 1.)
+        q = torch.tensor(q, dtype = torch.float32).transpose(0,1)
+        l = torch.linalg.cholesky(q)
+        dw = torch.matmul(torch.randn(M * N, d) * np.sqrt(T / N), l)
+        dw = dw.view(M, N, d).permute(0, 2, 1)
+        w = torch.cumsum(dw, dim=2)
+        t = torch.tensor(np.linspace(start=T / N, stop=T , num=N, endpoint=True), dtype=torch.float32)
+        s = torch.exp((r - div - sigma ** 2 / 2) * t + sigma * w) * S0
+        s = s.permute(1,0,2)
+        dw = dw.permute(1,0,2)
         
-        return X, dW
+        return s.numpy(), dw.numpy()
 
     def _generate_hypercube_basis(self, S):
         k = self.k
         delta = self.delta
-        dims = self.dims
         dim_phi = self.dim_phi
         cube_indices = self.cube_indices
         num_basis_per_cube = self.num_basis_per_cube
-        M, N = S.shape[1], S.shape[2]  
-        indicators_list = []
+        dims, M, N = S.shape
+        indicators_list = []*self.N
 
         cube_min_vals = [np.maximum(np.array([cube_index[dim] * delta for dim in range(dims)]), 
                                     0) for cube_index in cube_indices]
@@ -226,6 +233,7 @@ class BSDEOptionPricingEuropean:
         Z0_sample = np.mean(Z, axis=0)
         sample_finish_time = time.time() - sample_time
         print(f"Done with sample: {sample_id+1} in {sample_finish_time} seconds")
+        print(Y0_sample)
         return Y0_sample, Z0_sample, domain_out_of_range
 
     def _bsde_solver(self):
@@ -294,23 +302,25 @@ class BSDEOptionPricingEuropean:
         Y, Z, Y_errors, Z_errors, rows, computation_times, memory_usages, errors = [], [], [], [], [], [], [], []
 
         for M_val in M_values:
-            tracemalloc.start()
+            memory_monitor = MemoryMonitor()
+            memory_monitor.start()
             start_time = time.time()
             self.M = M_val
+
+
             Y0_array, Z0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
 
-            #error = 1/self.samples * np.sum((est_Y0 - bs_price)**2)
-            error = 0
+            bs_price = 11.2
+            error = np.mean((Y0_array - bs_price) **2)
 
             end_time = time.time()
             computation_time = end_time - start_time
 
-            _, memory_usage_bytes = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
-            memory_usage_megabytes = memory_usage_bytes / 10e6
-
+            memory_monitor.stop()
+            memory_monitor.join()
+            memory_usage_megabytes = memory_monitor.peak_memory
 
             Y.append(est_Y0)
             Z.append(est_Z0)
@@ -325,71 +335,14 @@ class BSDEOptionPricingEuropean:
                          CI_Z[0], CI_Z[1], computation_time, memory_usage_megabytes])
             print(f'Done with M_val: {M_val}.')
 
+        memory_usages.reverse()
+
         self._generate_plot(M_values, Y, Y_errors, function_name, bs_price, nofig)
         self._generate_table(rows, function_name)
 
         self._plot_computation_times(M_values, computation_times, function_name)
         self._plot_convergence_vs_computation_time(computation_times, errors, function_name)
         self._plot_memory_usage_vs_convergence_error(memory_usages, errors, function_name)
-
-    def plot_and_show_table_by_deltas(self, deltas, nofig=False, bs_price=None):
-        """ Plots and show tables by varying degrees """
-        function_name = inspect.currentframe().f_code.co_name
-        Y, Z, Y_errors, Z_errors, rows, computation_times = [], [], [], [], [], []
-
-        for delta in deltas:
-            start_time = time.time()
-            self.delta = delta 
-            Y0_array, Z0_array = self._bsde_solver()
-            est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
-            est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
-
-            end_time = time.time()
-            computation_time = end_time - start_time
-
-            Y.append(est_Y0)
-            Z.append(est_Z0)
-            Y_errors.append(std_Y0)
-            Z_errors.append(std_Z0)
-            computation_times.append(computation_time)
-            rows.append([delta, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
-                         CI_Z[0], CI_Z[1], computation_time])
-            print(f'Done with delta: {delta}.')
-
-        self._generate_plot(deltas, Y, Y_errors, function_name, bs_price, nofig)
-        self._generate_table(rows, function_name)
-
-        self._plot_computation_times(deltas, computation_times, function_name)
-
-    def plot_and_show_table_by_samples(self, samples, nofig=False, bs_price=None):
-        """ Plots and show tables by varying samples """
-        function_name = inspect.currentframe().f_code.co_name
-        Y, Z, Y_errors, Z_errors, rows, computation_times = [], [], [], [], [], []
-
-        for sample in samples:
-            start_time = time.time()
-            
-            self.samples = sample
-            Y0_array, Z0_array = self._bsde_solver()
-            est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
-            est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
-            
-            end_time = time.time()
-            computation_time = end_time - start_time
-            
-            Y.append(est_Y0)
-            Z.append(est_Z0)
-            Y_errors.append(std_Y0)
-            Z_errors.append(std_Z0)
-            computation_times.append(computation_time)
-            rows.append([sample, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
-                         CI_Z[0], CI_Z[1], computation_time])
-            print(f'Done with sample: {sample}. Computation time: {computation_time:.4f} seconds')
-
-        self._generate_plot(samples, Y, Y_errors, function_name, bs_price, nofig)
-        self._generate_table(rows, function_name)
-        
-        self._plot_computation_times(samples, computation_times, function_name)
 
     def _generate_plot(self, x_values, y_values, y_errors, function_name, bs_price, nofig):
         """ Generates the plot with the configs in the yaml file """
@@ -429,11 +382,8 @@ class BSDEOptionPricingEuropean:
             plt.show()
         plt.close()
 
-
     def _plot_memory_usage_vs_convergence_error(self, memory_usages, errors, function_name):
         plot_name = (function_name.split("_")[-1]).capitalize()
-        print(memory_usages)
-        print(errors)
         """ Plots the memory usage against the convergence rate"""
         plt.figure()
         plt.plot(memory_usages, errors, 'o-', label='Memory Usage - Convergence Rate')
@@ -452,11 +402,11 @@ class BSDEOptionPricingEuropean:
         plt.show()
         plt.close()
 
-    def _plot_computation_times(self, samples, computation_times, function_name):
+    def _plot_computation_times(self, x_values, computation_times, function_name):
         plot_name = (function_name.split("_")[-1]).capitalize()
         """ Plots the computation times against the number of samples """
         plt.figure()
-        plt.plot(samples, computation_times, 'o-', label='Computation Time')
+        plt.plot(x_values, computation_times, 'o-', label='Computation Time')
         plt.xlabel(f'Number of {plot_name}')
         plt.ylabel('Computation Time (seconds)')
         plt.title(f'Computation Time vs. Number of {plot_name}')
@@ -504,8 +454,7 @@ class BSDEOptionPricingEuropean:
             [function_name.split('_')[-1].capitalize(), 
              'Estimated Price Y0', 'Std. Deviation Y0',
             'CI Lower Bound Y0', 'CI Upper Bound Y0','Estimated Volatility Z0', 
-            'Std. Deviation Z0', 'CI Lower Bound Z0', 'CI Upper Bound Z0', 
-            'Computation Time', 'Memoery Usage (MB)']
+            'Std. Deviation Z0', 'CI Lower Bound Z0', 'CI Upper Bound Z0', 'Computation Time', 'Memory Usage']
         )
 
         table_name = configs['plot_config'][function_name]['table_name_template'].format(
@@ -523,7 +472,7 @@ class BSDEOptionPricingEuropean:
         df_rounded = df.round(4)
         df_rounded.to_csv(table_path, index=False)
         print(f"Table saved to {table_path}")
-
+    
     def solve(self):
         """ Method called to run the program and solve the BSDE """
         start_timer = time.time()
@@ -732,3 +681,21 @@ class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropeanSpread):
     def __repr__(self):
         base_repr = super().__repr__()
         return base_repr[:-1] + f"\n  opt_style='{self._opt_style}'\n  K2='{self.K2}'\n  R='{self.R}'\n)"
+
+
+class MemoryMonitor(Thread):
+    def __init__(self):
+        Thread.__init__(self)
+        self.process = psutil.Process(os.getpid())
+        self.peak_memory = 0
+        self.running = True
+
+    def run(self):
+        while self.running:
+            current_memory = self.process.memory_info().rss / (1024 ** 2)  
+            if current_memory > self.peak_memory:
+                self.peak_memory = current_memory
+            time.sleep(0.01)  
+
+    def stop(self):
+        self.running = False
