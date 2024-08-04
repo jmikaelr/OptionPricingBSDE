@@ -60,7 +60,7 @@ def main():
         elif args.opt_style == 'europeanspread':
             option_pricing_obj = BSDEOptionPricingEuropeanSpread(args.S, args.mu, args.sigma, 
                                                                  args.corr, args.K, args.r, 
-                                                                 args.T, args.N, 
+                                                                 args.div, args.T, args.N, 
                                                                  args.M, args.L, args.samples, 
                                                                  args.dims, args.opt_payoff, 
                                                                  args.H, args.delta, args.k,
@@ -68,7 +68,7 @@ def main():
         elif args.opt_style == 'americanspread':
             option_pricing_obj = BSDEOptionPricingAmericanSpread(args.S, args.mu, args.sigma, 
                                                                  args.corr, args.K, args.r, 
-                                                                 args.T, args.N, 
+                                                                 args.div, args.T, args.N, 
                                                                  args.M, args.L, args.samples, 
                                                                  args.dims, args.opt_payoff, 
                                                                  args.H, args.delta, args.k,

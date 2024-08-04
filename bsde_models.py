@@ -1,4 +1,5 @@
 import time
+import sys
 import psutil
 from joblib import Parallel, delayed
 import itertools
@@ -192,10 +193,12 @@ class BSDEOptionPricingEuropean:
         """ Generates the conditional expectation for Z at time t_i """
         b_z =  p_li.T @ (Y_plus * dw.T)
         Z = np.zeros((p_li.shape[0], self.dims))
+
         for d in range(self.dims):
             alpha_z = splinalg.lsqr(A, b_z[:, d].toarray() if sp.issparse(b_z[:, d]) else 
                                     b_z[:, d], atol=0,btol=0,conlim=0)[0]
             Z[:, d] = (p_li @ alpha_z) 
+
         return Z / self.dt
        
     def _generate_Y(self, p_li, A, Y_plus, Z):
@@ -209,7 +212,8 @@ class BSDEOptionPricingEuropean:
         """ Returns the driver in the BSDE with same interest for lending and borrowing """
         sum_term = 0
         for dim in range(self.dims):
-            ((self.mu - self.r)/self.sigma) * Z[:, dim]
+            sum_term += ((self.mu - self.r)/self.sigma) * Z[:, dim]
+        sum_term = np.expand_dims(sum_term, axis=1)
         return -(self.r * Y_plus + sum_term) 
 
     def _sample_task(self, sample_id):
@@ -233,7 +237,6 @@ class BSDEOptionPricingEuropean:
         Z0_sample = np.mean(Z, axis=0)
         sample_finish_time = time.time() - sample_time
         print(f"Done with sample: {sample_id+1} in {sample_finish_time} seconds")
-        print(Y0_sample)
         return Y0_sample, Z0_sample, domain_out_of_range
 
     def _bsde_solver(self):
@@ -312,7 +315,7 @@ class BSDEOptionPricingEuropean:
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
             est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)
 
-            bs_price = 11.2
+            bs_price = 7.05
             error = np.mean((Y0_array - bs_price) **2)
 
             end_time = time.time()
@@ -560,9 +563,9 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
         return base_repr[:-1] + f" opt_style='{self._opt_style}'\n)"
 
 class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
-    def __init__(self, S0, mu, sigma, correlation, K, r, T, N, M, 
+    def __init__(self, S0, mu, sigma, correlation, K, r, div, T, N, M, 
                  confidence_level, samples, dims, option_payoff, domain, delta, k, K2, R):
-        super().__init__(S0, mu, sigma, correlation, K, r, T, N, M, 
+        super().__init__(S0, mu, sigma, correlation, K, r, div, T, N, M, 
                          confidence_level, samples, dims, option_payoff, domain, delta, k) 
         if K2 is None:
             raise ValueError('K2 must be specified for a spread option.')
@@ -595,87 +598,108 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
         
         term1 = Y_plus * self.R
         term2 = Z_sum * self.lamb
-        term3 = (self.R - self.r) * np.minimum(Y_plus - Z_sum/self.sigma, 0)
+        term3 = (self.R - self.r) * np.maximum(Z_sum/self.sigma - Y_plus, 0)
 
         result = - term1 - term2 + term3
         return result
 
+    def _sample_task(self, sample_id):
+        sample_time = time.time()
+        S, dw = self._generate_stock_paths()
+        domain_out_of_range = ((np.max(S) > (self.S0 + self.H)) or 
+                               (np.min(S) < (self.S0 - self.H)))
+        Y_plus = self._payoff_func(S[:, :, -1])
+        Y = np.zeros(self.M)
+        Z = np.zeros((self.M, self.dims))
+        p_li_list = self._generate_hypercube_basis(S)
+        for i in range(self.N - 1, -1, -1):
+            p_li = p_li_list[i] 
+            A = p_li.T @ p_li
+            Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
+            Y = self._generate_Y(p_li, A, Y_plus, Z)
+            Y_plus = Y 
+            del p_li, A
+
+        Y0_sample = np.mean(Y_plus)
+        Z0_sample = np.mean(Z, axis=0)
+        sample_finish_time = time.time() - sample_time
+        print(f"Done with sample: {sample_id+1} in {sample_finish_time} seconds")
+        print(Y0_sample)
+        return Y0_sample, Z0_sample, domain_out_of_range
+
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
-        domain_out_of_range = False
-        Y0_samples = np.zeros(self.samples) 
-        Z0_samples = np.zeros((self.dims, self.samples))
+        results = Parallel(n_jobs=-1)(delayed(self._sample_task)(k) for k in range(self.samples))
         
-        for k in range(self.samples):
-            sample_time = time.time()
-            S, dw = self._generate_stock_paths()
-            if ((np.max(S) > (np.max(self.S0) + self.H)) or 
-                (np.min(S) < (np.min(self.S0) - self.H))):
+        Y0_samples = np.zeros(self.samples)
+        Z0_samples = np.zeros((self.dims, self.samples))
+        domain_out_of_range = False
+
+        for k, result in enumerate(results):
+            Y0_samples[k] = result[0]
+            Z0_samples[:, k] = result[1]
+            if result[2]:
                 domain_out_of_range = True
-            Y_plus = self._payoff_func(S[:, :, -1])
-            Y = np.zeros(self.M)
-            Z = np.zeros((self.M, self.dims))
-            p_li_list = self._generate_hypercube_basis(S)
-            for i in range(self.N - 1, -1, -1):
-                p_li = p_li_list[i] 
-                A = p_li.T @ p_li
-                Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
-                Y = self._generate_Y(p_li, A, Y_plus, Z)
-                Y_plus = Y
-                del p_li, A
-             
-            Y0_samples[k] = np.mean(Y_plus)
-            Z0_samples[:, k] = np.mean(Z, axis=0)
-            sample_finish_time = time.time() - sample_time
-            print(f"Done with sample: {k+1} in {sample_finish_time} seconds")
-            del p_li_list, S, dw, Z, Y, Y_plus
+
         if domain_out_of_range:
             print("Domain possibly out of range, consider increasing H!")
-        return Y0_samples, Z0_samples   
+            
+        return Y0_samples, Z0_samples
+
+
 
     def __repr__(self):
         base_repr = super().__repr__()
         return base_repr[:-1] + f"\n  opt_style='{self._opt_style}'\n  K2='{self.K2}'\n  R='{self.R}'\n)"
 
 class BSDEOptionPricingAmericanSpread(BSDEOptionPricingEuropeanSpread):
-    def __init__(self, S0, mu, sigma, correlation, K, r, T, N, M, 
+    def __init__(self, S0, mu, sigma, correlation, K, r, div, T, N, M, 
                  confidence_level, samples, dims, option_payoff, domain, delta, k, K2, R):
-        super().__init__(S0, mu, sigma, correlation, K, r, T, N, M, 
+        super().__init__(S0, mu, sigma, correlation, K, r, div, T, N, M, 
                          confidence_level, samples, dims, option_payoff, domain, delta, k, K2, R)
         self._opt_style = 'americanspread'
 
+    def _sample_task(self, sample_id):
+        sample_time = time.time()
+        S, dw = self._generate_stock_paths()
+        domain_out_of_range = ((np.max(S) > (self.S0 + self.H)) or 
+                               (np.min(S) < (self.S0 - self.H)))
+        Y_plus = self._payoff_func(S[:, :, -1])
+        Y = np.zeros(self.M)
+        Z = np.zeros((self.M, self.dims))
+        p_li_list = self._generate_hypercube_basis(S)
+        for i in range(self.N - 1, -1, -1):
+            p_li = p_li_list[i] 
+            A = p_li.T @ p_li
+            Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
+            Y = self._generate_Y(p_li, A, Y_plus, Z)
+            exercise_values = self._payoff_func(S[:, :, i])
+            Y_plus = np.maximum(Y, exercise_values)
+            del p_li, A
+
+        Y0_sample = np.mean(Y_plus)
+        Z0_sample = np.mean(Z, axis=0)
+        sample_finish_time = time.time() - sample_time
+        print(f"Done with sample: {sample_id+1} in {sample_finish_time} seconds")
+        return Y0_sample, Z0_sample, domain_out_of_range
+
     def _bsde_solver(self):
         """ Solves the backward stochastic differential equation to estimate option prices. """
-        domain_out_of_range = False
+        results = Parallel(n_jobs=-1)(delayed(self._sample_task)(k) for k in range(self.samples))
+        
         Y0_samples = np.zeros(self.samples)
         Z0_samples = np.zeros((self.dims, self.samples))
+        domain_out_of_range = False
 
-        for k in range(self.samples):
-            sample_time = time.time()
-            S, dw = self._generate_stock_paths()
-            if ((np.max(S) > (np.max(self.S0) + self.H)) or 
-                (np.min(S) < (np.min(self.S0) - self.H))):
+        for k, result in enumerate(results):
+            Y0_samples[k] = result[0]
+            Z0_samples[:, k] = result[1]
+            if result[2]:
                 domain_out_of_range = True
-            Y_plus = self._payoff_func(S[:, :, -1])
-            Y = np.zeros(self.M)
-            Z = np.zeros((self.M, self.dims))
-            p_li_list = self._generate_hypercube_basis(S)
-            for i in range(self.N - 1, -1, -1):
-                p_li = p_li_list[i] 
-                A = p_li.T @ p_li
-                Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
-                Y = self._generate_Y(p_li, A, Y_plus, Z)
-                exercise_values = self._payoff_func(S[:, :, i])
-                Y_plus = np.maximum(Y, exercise_values)
-                del p_li, A
-             
-            Y0_samples[k] = np.mean(Y_plus)
-            Z0_samples[:, k] = np.mean(Z, axis=0)
-            sample_finish_time = time.time() - sample_time
-            print(f"Done with sample: {k+1} in {sample_finish_time} seconds")
-            del p_li_list, S, dw, Z, Y, Y_plus
+
         if domain_out_of_range:
             print("Domain possibly out of range, consider increasing H!")
+            
         return Y0_samples, Z0_samples
 
     def __repr__(self):
