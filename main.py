@@ -48,7 +48,7 @@ def main():
                                                            args.opt_payoff, args.H, 
                                                            args.delta, args.k)
             if args.dims == 1:
-                price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.opt_payoff)
+                price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.div, args.opt_payoff)
         elif args.opt_style == 'american':
             option_pricing_obj = BSDEOptionPricingAmerican(args.S, args.mu, args.sigma, 
                                                            args.corr, args.K,
@@ -96,18 +96,20 @@ def main():
     else:
         raise ValueError('Invalid option: {args.opt_style}')
 
-def black_scholes(S, K, T, r, sigma, opt_payoff):
-    """ Calculates an european option using the analytical blach-scholes
-    formula """
+
+def black_scholes(S, K, T, r, sigma, q, opt_payoff):
+    """Calculates a European option using the analytical Black-Scholes formula, including dividends."""
     N = norm.cdf
-    d1 = (np.log(S/K) + (r + sigma**2/2)*T) / (sigma*np.sqrt(T))
+    d1 = (np.log(S/K) + (r - q + sigma**2/2)*T) / (sigma*np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
     if opt_payoff == 'call':
-        return S * N(d1) - K * np.exp(-r*T)* N(d2)
+        return S * np.exp(-q*T) * N(d1) - K * np.exp(-r*T) * N(d2)
     elif opt_payoff == 'put':
-        return K*np.exp(-r*T)*N(-d2) - S * N(-d1)
+        return K * np.exp(-r*T) * N(-d2) - S * np.exp(-q*T) * N(-d1)
     else:
         raise ValueError(f'Invalid payoff {opt_payoff}, it must be either "call" or "put"')
+
+
 
 if __name__ == '__main__':
     main()

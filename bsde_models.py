@@ -235,7 +235,6 @@ class BSDEOptionPricingEuropean:
             A = p_li.T @ p_li
             Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
             Y = self._generate_Y(p_li, A, Y_plus, Z)
-            print(Y.shape)
             Y_plus = Y 
             del p_li, A
 
@@ -315,7 +314,6 @@ class BSDEOptionPricingEuropean:
             memory_monitor.start()
             start_time = time.time()
             self.M = M_val
-
 
             Y0_array, Z0_array = self._bsde_solver()
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)
