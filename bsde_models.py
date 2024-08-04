@@ -11,6 +11,7 @@ from scipy.stats import norm
 import scipy.sparse as sp
 import scipy.sparse.linalg as splinalg
 import matplotlib.pyplot as plt
+from scipy.sparse.linalg import lsqr
 import inspect
 from threading import Thread
 import torch
@@ -192,12 +193,8 @@ class BSDEOptionPricingEuropean:
     def _generate_Z(self, p_li, A, Y_plus, dw):
         """ Generates the conditional expectation for Z at time t_i """
         b_z =  p_li.T @ (Y_plus * dw.T)
-        Z = np.zeros((p_li.shape[0], self.dims))
-
-        for d in range(self.dims):
-            alpha_z = splinalg.lsqr(A, b_z[:, d].toarray() if sp.issparse(b_z[:, d]) else 
-                                    b_z[:, d], atol=0,btol=0,conlim=0)[0]
-            Z[:, d] = (p_li @ alpha_z) 
+        alpha_z = self._solve_lsqr(A, b_z)
+        Z = (p_li @ alpha_z)
 
         return Z / self.dt
        
@@ -205,16 +202,24 @@ class BSDEOptionPricingEuropean:
         """ Generates the conditional expectation for Y at time t_i """
         opr = (Y_plus + self.dt * self._driver(Y_plus, Z))
         b_y = p_li.T @ opr
-        alpha_y = np.expand_dims(splinalg.lsqr(A, b_y, atol=0,btol=0,conlim=0)[0], axis = 1)
+        alpha_y = self._solve_lsqr(A, b_y)
+        result = p_li @ alpha_y
+        result = result[:Y_plus.shape[0]].reshape(-1, 1)
         return (p_li @ alpha_y) 
+
+    def _solve_lsqr(self, A, b_y):
+        """ Solve least-squares problem for each column of b_y individually """
+        results = []
+        for i in range(b_y.shape[1]):
+            b_col = b_y[:, i]
+            alpha_col = lsqr(A, b_col, atol=0, btol=0, conlim=0)[0]
+            results.append(alpha_col)
+        return np.stack(results, axis=1)
 
     def _driver(self, Y_plus, Z):
         """ Returns the driver in the BSDE with same interest for lending and borrowing """
-        sum_term = 0
-        for dim in range(self.dims):
-            sum_term += ((self.mu - self.r)/self.sigma) * Z[:, dim]
-        sum_term = np.expand_dims(sum_term, axis=1)
-        return -(self.r * Y_plus + sum_term) 
+        driver = -(self.r * Y_plus + self.lamb * Z)  
+        return driver 
 
     def _sample_task(self, sample_id):
         sample_time = time.time()
@@ -230,6 +235,7 @@ class BSDEOptionPricingEuropean:
             A = p_li.T @ p_li
             Z = self._generate_Z(p_li, A, Y_plus, dw[:, :, i])
             Y = self._generate_Y(p_li, A, Y_plus, Z)
+            print(Y.shape)
             Y_plus = Y 
             del p_li, A
 
@@ -523,6 +529,7 @@ class BSDEOptionPricingAmerican(BSDEOptionPricingEuropean):
         domain_out_of_range = ((np.max(S) > (self.S0 + self.H)) or 
                                (np.min(S) < (self.S0 - self.H)))
         Y_plus = self._payoff_func(S[:, :, -1])
+        
         Y = np.zeros(self.M)
         Z = np.zeros((self.M, self.dims))
         p_li_list = self._generate_hypercube_basis(S)
@@ -594,11 +601,9 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
 
     def _driver(self, Y_plus, Z):
         """ Returns the driver in the BSDE for different interest rates for borrowing and lending """
-        Z_sum = np.sum(Z, axis=1, keepdims=True)
-        
         term1 = Y_plus * self.R
-        term2 = Z_sum * self.lamb
-        term3 = (self.R - self.r) * np.maximum(Z_sum/self.sigma - Y_plus, 0)
+        term2 = Z * self.lamb
+        term3 = (self.R - self.r) * np.minimum(Y_plus - Z/self.sigma, 0)
 
         result = - term1 - term2 + term3
         return result
