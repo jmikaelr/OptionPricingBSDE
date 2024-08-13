@@ -299,7 +299,7 @@ class BSDEOptionPricingEuropean:
     # Plotting results by varying N (number of time steps)
     def plot_and_show_table_by_N(self, N_values, nofig=False, bs_price=None):
         """ Plots and show tables by varying M """
-        bs_price = 19.9924  # Reference price for comparison
+
         function_name = inspect.currentframe().f_code.co_name
         Y, Z, Y_errors, Z_errors, rows, computation_times, memory_usages, errors = [], [], [], [], [], [], [], []
 
@@ -333,9 +333,12 @@ class BSDEOptionPricingEuropean:
             
             computation_times.append(computation_time)
             memory_usages.append(memory_usage_megabytes)
-
-            rows.append([N_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
-                         CI_Z[0], CI_Z[1], error, computation_time, memory_usage_megabytes])
+            if bs_price:
+                rows.append([N_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
+                            CI_Z[0], CI_Z[1], error, computation_time, memory_usage_megabytes])
+            else:
+                rows.append([N_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
+                         CI_Z[0], CI_Z[1], computation_time, memory_usage_megabytes])
             print(f'Done with N_val: {N_val}.')
 
         memory_usages.reverse()  # Reverse memory usage for plotting
@@ -351,7 +354,6 @@ class BSDEOptionPricingEuropean:
     # Plotting results by varying M (number of Monte Carlo simulations)
     def plot_and_show_table_by_M(self, M_values, nofig=False, bs_price=None):
         """ Plots and show tables by varying M """
-        bs_price = 23.905  # Reference price for comparison
 
         function_name = inspect.currentframe().f_code.co_name
         Y, Z, Y_errors, Z_errors, rows, computation_times, memory_usages, errors = [], [], [], [], [], [], [], []
@@ -365,8 +367,8 @@ class BSDEOptionPricingEuropean:
             Y0_array, Z0_array = self._bsde_solver()  # Solve the BSDE
             est_Y0, std_Y0, CI_Y = self._confidence_interval(Y0_array)  # Calculate confidence interval for Y_0
             est_Z0, std_Z0, CI_Z = self._confidence_interval(Z0_array)  # Calculate confidence interval for Z_0
-
-            error = np.mean((Y0_array - bs_price) **2)  # Calculate the error with respect to the reference price
+            if bs_price:
+                error = np.mean((Y0_array - bs_price) **2)  # Calculate the error with respect to the reference price
 
             end_time = time.time()
             computation_time = end_time - start_time
@@ -379,13 +381,18 @@ class BSDEOptionPricingEuropean:
             Z.append(est_Z0)
             Y_errors.append(std_Y0)
             Z_errors.append(std_Z0)
-            errors.append(error)
+            if bs_price:
+                errors.append(error)
             
             computation_times.append(computation_time)
             memory_usages.append(memory_usage_megabytes)
 
-            rows.append([M_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
-                         CI_Z[0], CI_Z[1], error, computation_time, memory_usage_megabytes])
+            if bs_price:
+                rows.append([M_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
+                            CI_Z[0], CI_Z[1], error, computation_time, memory_usage_megabytes])
+            else:
+                rows.append([M_val, est_Y0, std_Y0, CI_Y[0], CI_Y[1], est_Z0, std_Z0, 
+                         CI_Z[0], CI_Z[1], computation_time, memory_usage_megabytes])
             print(f'Done with M_val: {M_val}.')
 
         memory_usages.reverse()  # Reverse memory usage for plotting
@@ -393,7 +400,8 @@ class BSDEOptionPricingEuropean:
         if not nofig:
             self._generate_plot(M_values, Y, Y_errors, function_name, bs_price)
             self._plot_computation_times(M_values, computation_times, function_name)
-            self._plot_convergence(M_values, errors, function_name)
+            if bs_price:
+                self._plot_convergence(M_values, errors, function_name)
 
         self._generate_table(rows, function_name)
 
@@ -532,15 +540,24 @@ class BSDEOptionPricingEuropean:
 
         first_elements = [row[0] for row in rows]
         
-        columns = (
-            [function_name.split('_')[-1].capitalize(), 
-             'Estimated Price Y0', 'Std. Deviation Y0',
-            'CI Lower Bound Y0', 'CI Upper Bound Y0','Estimated Volatility Z0', 
-            'Std. Deviation Z0', 'CI Lower Bound Z0', 'CI Upper Bound Z0', 'MSE (%)', 
-             'Computation Time', 'Memory Usage']
-        )
-        for row in rows:
-            row[9] = f"{row[9]:.3e}"
+        if len(rows[0]) == 12:
+            columns = (
+                [function_name.split('_')[-1].capitalize(), 
+                 'Estimated Price Y0', 'Std. Deviation Y0',
+                'CI Lower Bound Y0', 'CI Upper Bound Y0','Estimated Volatility Z0', 
+                'Std. Deviation Z0', 'CI Lower Bound Z0', 'CI Upper Bound Z0', 'MSE (%)', 
+                 'Computation Time', 'Memory Usage']
+            )
+            for row in rows:
+                row[9] = f"{row[9]:.3e}"
+        else:
+            columns = (
+                [function_name.split('_')[-1].capitalize(), 
+                 'Estimated Price Y0', 'Std. Deviation Y0',
+                'CI Lower Bound Y0', 'CI Upper Bound Y0','Estimated Volatility Z0', 
+                'Std. Deviation Z0', 'CI Lower Bound Z0', 'CI Upper Bound Z0', 
+                 'Computation Time', 'Memory Usage']
+            )
 
         table_name = configs['plot_config'][function_name]['table_name_template'].format(
             S_0=self.S0,

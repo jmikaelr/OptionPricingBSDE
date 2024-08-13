@@ -30,6 +30,7 @@ def main():
 
     parser.add_argument("--plot_type", type=str, choices = ['N', 'M'], default = None, help="What kind of plot, default is no plot.")
     parser.add_argument("--plot_values", type=str, help="Comma-separated list of values for the selected plot type (e.g., 10,20,30).")
+    parser.add_argument("--ref", type=float, default = None, help="Reference price for plotting")
     args = parser.parse_args()
     if args.plot_type == 'deltas':
         plot_values = [float(x) for x in args.plot_values.split(',')] if args.plot_values else None
@@ -46,7 +47,7 @@ def main():
                                                            args.opt_payoff, args.H, 
                                                            args.delta, args.k)
             if args.dims == 1:
-                price = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.div, args.opt_payoff)
+                args.ref = black_scholes(args.S, args.K, args.T, args.r, args.sigma, args.div, args.opt_payoff)
         elif args.opt_style == 'american':
             option_pricing_obj = BSDEOptionPricingAmerican(args.S, args.mu, args.sigma, 
                                                            args.corr, args.K,
@@ -77,14 +78,14 @@ def main():
                 raise ValueError('No plot values to plot.')
             elif args.plot_type == "N": 
                 print(f"Plotting by varying N with values: {args.plot_values}")
-                option_pricing_obj.plot_and_show_table_by_N(plot_values, args.nofig, price)
+                option_pricing_obj.plot_and_show_table_by_N(plot_values, args.nofig, args.ref)
             elif args.plot_type == "M":
                 print(f"Plotting by varying M with values: {args.plot_values}")
-                option_pricing_obj.plot_and_show_table_by_M(plot_values, args.nofig, price)
+                option_pricing_obj.plot_and_show_table_by_M(plot_values, args.nofig, args.ref)
         else:  
             option_pricing_obj.solve()  
-            if price:
-                print(f"{args.opt_style.capitalize()} {args.opt_payoff} option price: {price}")
+            if args.ref:
+                print(f"{args.opt_style.capitalize()} {args.opt_payoff} option price: {args.ref}")
     else:
         raise ValueError('Invalid option: {args.opt_style}')
 
