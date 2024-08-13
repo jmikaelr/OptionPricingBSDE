@@ -2,8 +2,6 @@ from bsde_models import *
 import numpy as np
 from scipy.stats import norm
 import argparse
-import io
-
 
 def main():
     parser = argparse.ArgumentParser(description="Option Pricing using BSDE") 
@@ -15,7 +13,7 @@ def main():
     parser.add_argument("--R", type=float, default=0.06, help="Second rate")
     parser.add_argument("--div", type=float, default=0.0, help="Dividend yield")
     parser.add_argument("--dims", type=int, default=1, help="Number of risky assets (stocks), default is one.")
-    parser.add_argument("--mu", type=float, default=0.0, help="Drift term on stock")
+    parser.add_argument("--mu", type=float, default=0.01, help="Drift term on stock")
     parser.add_argument("--sigma", type=float, default=0.2, help="Volatility (sigma)")
     parser.add_argument("--corr", type=float, default=0.5, help="Correlation (rho)")
     parser.add_argument("--T", type=float, default=0.25, help="Time to expiration (in years)")
@@ -30,7 +28,7 @@ def main():
     parser.add_argument("--opt_style", type=str, choices=['european', 'american', 'europeanspread', 'americanspread'], default='european', help="Option style")
     parser.add_argument("--nofig", action='store_true', help="Do not show plot. It plots by default.") 
 
-    parser.add_argument("--plot_type", type=str, choices = ['N', 'M', 'deltas', 'samples'], default = None, help="What kind of plot, default is no plot.")
+    parser.add_argument("--plot_type", type=str, choices = ['N', 'M'], default = None, help="What kind of plot, default is no plot.")
     parser.add_argument("--plot_values", type=str, help="Comma-separated list of values for the selected plot type (e.g., 10,20,30).")
     args = parser.parse_args()
     if args.plot_type == 'deltas':
@@ -74,7 +72,7 @@ def main():
                                                                  args.H, args.delta, args.k,
                                                                  args.K2, args.R)
         
-        if args.plot_type in ["N","M","deltas","samples"]:
+        if args.plot_type in ["N","M"]:
             if not plot_values:
                 raise ValueError('No plot values to plot.')
             elif args.plot_type == "N": 
@@ -83,12 +81,6 @@ def main():
             elif args.plot_type == "M":
                 print(f"Plotting by varying M with values: {args.plot_values}")
                 option_pricing_obj.plot_and_show_table_by_M(plot_values, args.nofig, price)
-            elif args.plot_type == "deltas":
-                print(f"Plotting by varying degrees with values: {args.plot_values}")
-                option_pricing_obj.plot_and_show_table_by_deltas(plot_values, args.nofig, price)
-            elif args.plot_type == "samples":
-                print(f"Plotting by varying samples size with values: {args.plot_values}")
-                option_pricing_obj.plot_and_show_table_by_samples(plot_values, args.nofig, price)
         else:  
             option_pricing_obj.solve()  
             if price:
@@ -103,9 +95,9 @@ def black_scholes(S, K, T, r, sigma, q, opt_payoff):
     d1 = (np.log(S/K) + (r - q + sigma**2/2)*T) / (sigma*np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
     if opt_payoff == 'call':
-        return S * np.exp(-q*T) * N(d1) - K * np.exp(-r*T) * N(d2)
+        return S * np.exp(-q*T) * N(d1) - K * np.exp(-r*T) * N(d2), N(d1) / sigma
     elif opt_payoff == 'put':
-        return K * np.exp(-r*T) * N(-d2) - S * np.exp(-q*T) * N(-d1)
+        return K * np.exp(-r*T) * N(-d2) - S * np.exp(-q*T) * N(-d1), (N(d1) - 1 / sigma)
     else:
         raise ValueError(f'Invalid payoff {opt_payoff}, it must be either "call" or "put"')
 

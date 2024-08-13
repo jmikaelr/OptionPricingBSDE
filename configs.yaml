@@ -3,8 +3,8 @@ plot_config:
     xlabel: "Number of Monte Carlo Simulations (M)"
     ylabel: "Option Price"
     title: "Option Price vs. Number of Monte Carlo Simulations (M)"
-    plot_name_template: "{opt_style}_{opt_payoff}_M_{min_value}_to_{max_value}_N_{N}_delta_{delta}.png"
-    table_name_template: "{opt_style}_{opt_payoff}_M_{min_value}_to_{max_value}_N_{N}_delta_{delta}.csv"
+    plot_name_template: "{opt_style}_{opt_payoff}_S={S_0}_mu={mu}_sigma={sigma}_T={T}_M={min_value},{max_value}_N={N}_delta={delta}.png"
+    table_name_template: "{opt_style}_{opt_payoff}_S={S_0}_mu={mu}_sigma={sigma}_T={T}_M={min_value},{max_value}_N={N}_delta={delta}.csv"
     nofig: False
 
   plot_and_show_table_by_N:
