@@ -11,11 +11,11 @@ where $xi$ in this case represents the option's payoff at maturity. For American
 ## Features
 
 - **European Options**: Implements pricing for vanilla European options with standard payoff functions:
-  - Call: $phi(S_T) = \max(S_T - K, 0)$
-  - Put: $phi(S_T) = \max(K - S_T, 0)$
+  - Call: $\phi(S_T) = \max(S_T - K, 0)$
+  - Put: $\phi(S_T) = \max(K - S_T, 0)$
 - **American Options**: Includes functionality for American options, which permit early exercise, adding complexity to the pricing model.
 - **Spread Options**:
-  - **European Spread**: Prices options with a payoff of $phi(S_T) = \max(S_T - K_1, 0) - 2\max(S_T - K_2, 0)$.
+  - **European Spread**: Prices options with a payoff of $\phi(S_T) = \max(S_T - K_1, 0) - 2\max(S_T - K_2, 0)$.
   - **American Spread**: Similar to European spread but allows early exercise.
 
 ## Requirements
@@ -69,25 +69,26 @@ python3 main.py
 - **$K2$**: Second strike price for spread options (only needed for spread options).
 - **$r$**: Risk-free interest rate (default: 0.01).
 - **$R$**: Second interest rate for spread options (only needed for spread options).
-- **$mu$**: Drift term of the stock's returns (default is similar to $r$ if not specified).
-- **$sigma$**: Volatility of the stock (default: 0.2).
+- **$\mu$**: Drift term of the stock's returns (default is similar to $r$ if not specified).
+- **$\sigma$**: Volatility of the stock (default: 0.2).
 - **$T$**: Time to expiration in years (default: 0.25).
 - **$N$**: Number of time steps for discretization (default: 20).
 - **$M$**: Number of Monte Carlo simulations (default: 1000).
 - **$L$**: Confidence level alpha (default: 0.025).
-- **$delta$**: Size of hypercubes (default: 1).
+- **$\delta$**: Size of hypercubes (default: 1).
 - **$H$**: Domain covered by the hypercubes (default: 60).
-- **$samples$**: Number of BSDE sample paths (default: 10).
-- **$opt_payoff$**: Option payoff type, choices are call or put (default: call).
-- **$opt_style$**: Option style, choices are european, american, europeanspread, americanspread (default: european).
-- **$nofig$**: If set, no plot will be shown (plots are shown by default unless this is specified).
-- **$plot_type$**: Type of plot based on parameter variation, choices are N, M. 
-- **$plot_values$**: Comma-separated values for the selected plot type (e.g., 10,20,30).
+- **samples**: Number of BSDE sample paths (default: 10).
+- **opt_payoff**: Option payoff type, choices are call or put (default: call).
+- **opt_style**: Option style, choices are european, american, europeanspread, americanspread (default: european).
+- **nofig**: If set, no plot will be shown (plots are shown by default unless this is specified).
+- **plot_type**: Type of plot based on parameter variation, choices are N, M. 
+- **plot_values**: Comma-separated values for the selected plot type (e.g., 10,20,30).
+- **ref**: Reference price for plotting convergence (default = None).
 
 ## Example Command
 
 ```bash
-python3 main.py --opt_style europeanspread --K 95 --K2 105 --r 0.01 --R 0.06 --mu 0.05 --S 100 --sigma 0.2 --T 0.25 --N 5 --delta 1 --M 1000 --plot_type N --plot_values 5,10,20,40
+python3 main.py --opt_style europeanspread --K 95 --K2 105 --r 0.01 --R 0.06 --mu 0.05 --S 100 --sigma 0.2 --T 0.25 --N 5 --delta 1 --M 1000 --plot_type N --plot_values 5,10,20,40 --ref 2.95
 ```
 
 This command will compute and save the option pricing results, generating plots in the /plots directory and tables in the /tables directory.
