@@ -682,7 +682,7 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
         if R is None:
             raise ValueError('No second interest rate given.')
         self.K2 = K2 
-        self.R = R 
+        self.R = R # Borrowing rate
         self._opt_style = 'europeanspread'
 
     # Adjusts the payoff function for a spread option
@@ -704,12 +704,13 @@ class BSDEOptionPricingEuropeanSpread(BSDEOptionPricingEuropean):
     # Adjusts the driver for different interest rates for borrowing and lending
     def _driver(self, Y_plus, Z):
         """ Returns the driver in the BSDE for different interest rates for borrowing and lending """
+        
         term1 = Y_plus * self.r
         term2 = Z * self.lamb
-        term3 = (self.R - self.r) * np.minimum(Y_plus - Z/self.sigma, 0)
+        term3 = (self.R - self.r) * np.maximum(-(Y_plus - Z/self.sigma), 0)
 
-        result = - term1 - term2 + term3
-        return result
+        driver =  -(term1 + term2 - term3)
+        return driver
 
     def _sample_task(self, sample_id):
         sample_time = time.time()

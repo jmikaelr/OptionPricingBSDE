@@ -10,7 +10,7 @@ def main():
     parser.add_argument("--K", type=float, default=95.0, help="Strike price")
     parser.add_argument("--K2", type=float, default=105, help="Second strike price")
     parser.add_argument("--r", type=float, default=0.01, help="Rate")
-    parser.add_argument("--R", type=float, default=0.06, help="Second rate")
+    parser.add_argument("--R", type=float, default=0.06, help="Second rate (Borrowing Rate)")
     parser.add_argument("--div", type=float, default=0.0, help="Dividend yield")
     parser.add_argument("--dims", type=int, default=1, help="Number of risky assets (stocks), default is one.")
     parser.add_argument("--mu", type=float, default=0.01, help="Drift term on stock")
