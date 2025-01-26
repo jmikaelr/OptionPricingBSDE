@@ -112,18 +112,6 @@ class BSDEOptionPricingEuropean:
         with open('configs.yaml', 'r') as config_file:
             return yaml.safe_load(config_file)
 
-    # Determines the option payoff type ("call" or "put") based on user input
-    def _get_opt_payoff(self, opt_payoff):
-        """ Retrieves the option payoff from user input """
-        if not isinstance(opt_payoff, str):
-            raise TypeError('Option type should be a string!')
-        if opt_payoff.lower() == 'call':
-            return 'call'
-        elif opt_payoff.lower() == 'put':
-            return 'put'
-        else:
-            raise TypeError('Invalid option type! It should be call or put')
-
     # Defines the payoff function for the option, used in the BSDE
     def _payoff_func(self, S):
         K = self.K
